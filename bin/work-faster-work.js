@@ -6,7 +6,7 @@ let electronBinary;
 try {
   electronBinary = require('electron');
 } catch (e) {
-  console.error('Could not load Electron. Try: npm install -g badclaude');
+  console.error('Could not load Electron. Try: npm install -g work-faster-work');
   process.exit(1);
 }
 
@@ -19,7 +19,7 @@ const child = spawn(electronBinary, [appPath], {
 });
 
 child.on('error', (err) => {
-  console.error('Failed to start badclaude:', err.message);
+  console.error('Failed to start work-faster-work:', err.message);
   process.exit(1);
 });
 

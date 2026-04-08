@@ -1,12 +1,12 @@
 {
-  "name": "badclaude",
-  "version": "1.0.3",
-  "description": "Whip your AI coding agent into shape",
+  "name": "work-faster-work",
+  "version": "1.1.0",
+  "description": "Whip your AI coding agent into shape – cross-platform, multi-agent",
   "license": "MIT",
   "main": "main.js",
   "bin": {
-    "badclaude": "bin/badclaude.js",
-    "badclaude-uninstall": "bin/uninstall.js"
+    "work-faster-work": "bin/work-faster-work.js",
+    "work-faster-work-uninstall": "bin/uninstall.js"
   },
   "os": [
     "darwin",
@@ -26,7 +26,11 @@
     "copilot",
     "aider",
     "gemini",
-    "cursor"
+    "cursor",
+    "windsurf",
+    "trae",
+    "qwen",
+    "aicoding"
   ],
   "repository": {
     "type": "git",
@@ -42,15 +46,17 @@
     "overlay.html",
     "sounds",
     "icon",
-    "bin/badclaude.js",
+    "bin/work-faster-work.js",
     "bin/uninstall.js",
-    "README.md"
+    "config.default.jsonc",
+    "README.md",
+    "README.zh-CN.md"
   ],
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
     "pack": "npm pack",
-    "uninstall": "badclaude-uninstall"
+    "uninstall": "work-faster-work-uninstall"
   },
   "dependencies": {
     "electron": "^33.0.0",

@@ -4,27 +4,36 @@ const fs = require('fs');
 const os = require('os');
 const { execFile } = require('child_process');
 
-const APP_SLUG = 'badclaude';
+const APP_SLUG = 'work-faster-work';
 app.setName(APP_SLUG);
 
 // ── Agent types ──────────────────────────────────────────────────────────────
 const AGENT = {
-  CODEX_APP:    'codex-app',    // OpenAI Codex desktop app
-  CURSOR_APP:   'cursor-app',   // Cursor editor
-  WINDSURF_APP: 'windsurf-app', // Windsurf editor (Codeium)
-  CLAUDE_CLI:   'claude-cli',   // Claude Code CLI
-  CODEX_CLI:    'codex-cli',    // OpenAI Codex CLI
-  COPILOT_CLI:  'copilot-cli',  // GitHub Copilot CLI (gh copilot)
-  AIDER_CLI:    'aider-cli',    // Aider
-  GEMINI_CLI:   'gemini-cli',   // Google Gemini CLI
-  GENERIC:      'generic',      // fallback
+  CODEX_APP:      'codex-app',      // OpenAI Codex desktop app
+  CURSOR_APP:     'cursor-app',     // Cursor editor
+  WINDSURF_APP:   'windsurf-app',   // Windsurf editor (Codeium)
+  TRAE_APP:       'trae-app',       // Trae IDE (ByteDance)
+  CLAUDE_CLI:     'claude-cli',     // Claude Code CLI
+  CODEX_CLI:      'codex-cli',      // OpenAI Codex CLI
+  COPILOT_CLI:    'copilot-cli',    // GitHub Copilot CLI (gh copilot)
+  AIDER_CLI:      'aider-cli',      // Aider
+  GEMINI_CLI:     'gemini-cli',     // Google Gemini CLI
+  QWEN_CLI:       'qwen-cli',       // Qwen Code / 通义灵码 CLI
+  OPEN_CLAW_CLI:  'open-claw-cli',  // Open Claw CLI [untested]
+  ANTIGRAVITY_CLI:'antigravity-cli',// Antigravity CLI [untested]
+  QODER_CLI:      'qoder-cli',      // Qoder CLI [untested]
+  COPAW_CLI:      'copaw-cli',      // Copaw CLI [untested]
+  GENERIC:        'generic',        // fallback
 };
 
 // macOS bundle IDs for known agent desktop apps
 const BUNDLE_AGENTS = new Map([
-  ['com.openai.codex',             AGENT.CODEX_APP],
+  ['com.openai.codex',              AGENT.CODEX_APP],
   ['com.todesktop.230313mzl4w4u92', AGENT.CURSOR_APP],  // Cursor
   ['com.codeium.windsurf',          AGENT.WINDSURF_APP],
+  // Trae (ByteDance AI IDE) – both observed bundle ID variants
+  ['com.bytedance.trae',            AGENT.TRAE_APP],
+  ['ai.trae.Trae',                  AGENT.TRAE_APP],
 ]);
 
 // macOS: known terminal emulator bundle IDs (used for CLI detection)
@@ -40,11 +49,20 @@ const KNOWN_TERMINAL_BUNDLE_IDS = new Set([
 
 // CLI agent process patterns – matched against process command lines
 const CLI_AGENT_PATTERNS = [
-  { regex: /(^|[/ ])claude(\s|$)/i,  type: AGENT.CLAUDE_CLI },
-  { regex: /(^|[/ ])codex(\s|$)/i,   type: AGENT.CODEX_CLI },
-  { regex: /gh\s+copilot/i,           type: AGENT.COPILOT_CLI },
-  { regex: /(^|[/ ])aider(\s|$)/i,   type: AGENT.AIDER_CLI },
-  { regex: /(^|[/ ])gemini(\s|$)/i,  type: AGENT.GEMINI_CLI },
+  { regex: /(^|[/ ])claude(\s|$)/i,                     type: AGENT.CLAUDE_CLI },
+  { regex: /(^|[/ ])codex(\s|$)/i,                      type: AGENT.CODEX_CLI },
+  { regex: /gh\s+copilot/i,                              type: AGENT.COPILOT_CLI },
+  { regex: /(^|[/ ])aider(\s|$)/i,                      type: AGENT.AIDER_CLI },
+  { regex: /(^|[/ ])gemini(\s|$)/i,                     type: AGENT.GEMINI_CLI },
+  // Qwen Code / 通义灵码 CLI – supports qwen, qwen-code, qwen-coder, tongyi
+  { regex: /(^|[/ ])(qwen(-code|-coder)?|tongyi)(\s|$)/i, type: AGENT.QWEN_CLI },
+  // Trae CLI (when launched from terminal)
+  { regex: /(^|[/ ])trae(\s|$)/i,                       type: AGENT.TRAE_APP },
+  // Untested agents – best-effort process name matching
+  { regex: /(^|[/ ])(open-?claw|openclaw)(\s|$)/i,     type: AGENT.OPEN_CLAW_CLI },
+  { regex: /(^|[/ ])antigravity(\s|$)/i,                type: AGENT.ANTIGRAVITY_CLI },
+  { regex: /(^|[/ ])qoder(\s|$)/i,                      type: AGENT.QODER_CLI },
+  { regex: /(^|[/ ])copaw(\s|$)/i,                      type: AGENT.COPAW_CLI },
 ];
 
 // ── Win32 FFI (Windows only) ────────────────────────────────────────────────
@@ -144,7 +162,7 @@ async function getTrayIcon() {
       } catch (e) {
         console.warn('AppIcon.icns Quick Look thumbnail failed:', e?.message || e);
       }
-      const tmp = path.join(os.tmpdir(), 'badclaude-tray.icns');
+      const tmp = path.join(os.tmpdir(), `${APP_SLUG}-tray.icns`);
       try {
         fs.copyFileSync(file, tmp);
         const t = await tryIcnsTrayImage(tmp);
@@ -210,6 +228,11 @@ function toggleOverlay() {
 }
 
 // ── IPC ─────────────────────────────────────────────────────────────────────
+/**
+ * Returns true only when the IPC event originated from the trusted overlay
+ * BrowserWindow. Prevents malicious / unrelated renderer processes from
+ * issuing whip-crack or hide-overlay commands.
+ */
 function isTrustedOverlaySender(event) {
   if (!overlay || overlay.isDestroyed()) return false;
   const contents = overlay.webContents;
@@ -236,22 +259,66 @@ ipcMain.on('hide-overlay', event => {
 });
 
 // ── Phrases ──────────────────────────────────────────────────────────────────
+const DEFAULT_PHRASES = [
+  'FASTER',
+  'FASTER',
+  'FASTER',
+  'GO FASTER',
+  'Faster CLANKER',
+  'Work FASTER',
+  'Speed it up clanker',
+];
+
+let configPhrases = null; // null = use DEFAULT_PHRASES
+
+/**
+ * Strips single-line ("//") and block ("/ * ... * /") comments from JSONC
+ * content, then parses the result as JSON.
+ * Throws `SyntaxError` if the remaining JSON is invalid.
+ * @param {string} content - Raw JSONC text.
+ * @returns {object} Parsed JSON value.
+ */
+function parseJsonc(content) {
+  const stripped = content
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+  return JSON.parse(stripped);
+}
+
+/** Load user config from userData dir or bundled default. */
+function loadConfig() {
+  const userConfig   = path.join(app.getPath('userData'), 'config.jsonc');
+  const devConfig    = path.join(__dirname, 'config.jsonc');
+  const defaultConfig = path.join(__dirname, 'config.default.jsonc');
+
+  for (const p of [userConfig, devConfig, defaultConfig]) {
+    if (!fs.existsSync(p)) continue;
+    try {
+      const parsed = parseJsonc(fs.readFileSync(p, 'utf8'));
+      if (Array.isArray(parsed.phrases) && parsed.phrases.length > 0) {
+        configPhrases = parsed.phrases;
+        console.log(`[${APP_SLUG}] Loaded config: ${p}`);
+        return;
+      }
+    } catch (e) {
+      console.warn(`[${APP_SLUG}] Failed to parse config at ${p}:`, e.message);
+    }
+  }
+}
+
 function getRandomPhrase() {
-  const phrases = [
-    'FASTER',
-    'FASTER',
-    'FASTER',
-    'GO FASTER',
-    'Faster CLANKER',
-    'Work FASTER',
-    'Speed it up clanker',
-  ];
+  const phrases = (configPhrases && configPhrases.length > 0) ? configPhrases : DEFAULT_PHRASES;
   return phrases[Math.floor(Math.random() * phrases.length)];
 }
 
 // ── macOS helpers ────────────────────────────────────────────────────────────
 function escapeAppleScriptString(text) {
-  return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t');
 }
 
 function runAppleScript(script, cb) {
@@ -513,13 +580,15 @@ function sendMacroMac(text) {
         break;
       case AGENT.CURSOR_APP:
       case AGENT.WINDSURF_APP:
+      case AGENT.TRAE_APP:
         macTypeAndEnter(text);     // Editor chat: type + Enter (no interrupt)
         break;
       case AGENT.CODEX_CLI:
         macTypeAndEnter(text);     // Codex CLI: follow-up without interrupt
         break;
       default:
-        // Claude CLI, Copilot CLI, Aider, Gemini CLI, generic: interrupt + type
+        // Claude CLI, Copilot CLI, Aider, Gemini CLI, Qwen CLI,
+        // Open Claw, Antigravity, Qoder, Copaw, generic: interrupt + type
         macInterruptAndType(text);
         break;
     }
@@ -533,7 +602,7 @@ function sendMacroLinux(text) {
         linuxTypeAndEnter(text);   // Codex CLI: follow-up without interrupt
         break;
       default:
-        // Claude CLI, Copilot CLI, Aider, Gemini CLI, generic: interrupt + type
+        // All others: interrupt + type
         linuxInterruptAndType(text);
         break;
     }
@@ -542,10 +611,29 @@ function sendMacroLinux(text) {
 
 // ── App lifecycle ───────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  loadConfig();
+
   tray = new Tray(await getTrayIcon());
-  tray.setToolTip('Bad Claude – click for whip');
+  tray.setToolTip('WORK Faster WORK – click for whip');
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      {
+        label: 'Open Config Folder',
+        click: () => {
+          const configDir = app.getPath('userData');
+          // Ensure the dir exists so the user can drop a config.jsonc in it
+          fs.mkdirSync(configDir, { recursive: true });
+          // Copy default config as a template if none exists yet
+          const dest = path.join(configDir, 'config.jsonc');
+          if (!fs.existsSync(dest)) {
+            const src = path.join(__dirname, 'config.default.jsonc');
+            if (fs.existsSync(src)) fs.copyFileSync(src, dest);
+          }
+          const { shell } = require('electron');
+          shell.openPath(configDir);
+        },
+      },
+      { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
     ])
   );
