@@ -52,6 +52,12 @@ function refocusPreviousApp() {
           console.warn('refocus previous app (Cmd+Tab) failed:', err.message);
         }
       });
+    } else if (process.platform === 'linux') {
+      execFile('xdotool', ['key', 'alt+Tab'], err => {
+        if (err) {
+          console.warn('refocus previous app (alt+Tab) failed – is xdotool installed?:', err.message);
+        }
+      });
     }
   };
   setTimeout(run, delayMs);
@@ -111,6 +117,7 @@ async function getTrayIcon() {
     }
     return createTrayIconFallback();
   }
+  // Linux and other platforms: use Template.png
   return createTrayIconFallback();
 }
 
@@ -192,6 +199,8 @@ function sendMacro() {
     sendMacroWindows(chosen);
   } else if (process.platform === 'darwin') {
     sendMacroMac(chosen);
+  } else if (process.platform === 'linux') {
+    sendMacroLinux(chosen);
   }
 }
 
@@ -236,6 +245,25 @@ function sendMacroMac(text) {
     if (err) {
       console.warn('mac macro failed (enable Accessibility for terminal/app):', err.message);
     }
+  });
+}
+
+function sendMacroLinux(text) {
+  // Requires xdotool: sudo apt install xdotool  (X11 only; Wayland users need ydotool)
+  execFile('xdotool', ['key', 'ctrl+c'], err => {
+    if (err) {
+      console.warn('xdotool ctrl+c failed – is xdotool installed?:', err.message);
+      return;
+    }
+    execFile('xdotool', ['type', '--clearmodifiers', '--delay', '20', text], err => {
+      if (err) {
+        console.warn('xdotool type failed:', err.message);
+        return;
+      }
+      execFile('xdotool', ['key', 'Return'], err => {
+        if (err) console.warn('xdotool Return failed:', err.message);
+      });
+    });
   });
 }
 

@@ -9,6 +9,7 @@
   },
   "os": [
     "darwin",
+    "linux",
     "win32"
   ],
   "engines": {
@@ -22,12 +23,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GitFrog1111/badclaude.git"
+    "url": "git+https://github.com/SnifferCaptain/WORK_Faster_WORK.git"
   },
   "bugs": {
-    "url": "https://github.com/GitFrog1111/badclaude/issues"
+    "url": "https://github.com/SnifferCaptain/WORK_Faster_WORK/issues"
   },
-  "homepage": "https://github.com/GitFrog1111/badclaude#readme",
+  "homepage": "https://github.com/SnifferCaptain/WORK_Faster_WORK#readme",
   "files": [
     "main.js",
     "preload.js",
