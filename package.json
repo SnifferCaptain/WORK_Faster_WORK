@@ -1,11 +1,12 @@
 {
   "name": "badclaude",
-  "version": "1.0.2",
-  "description": "Whip Claude into shape",
+  "version": "1.0.3",
+  "description": "Whip your AI coding agent into shape",
   "license": "MIT",
   "main": "main.js",
   "bin": {
-    "badclaude": "bin/badclaude.js"
+    "badclaude": "bin/badclaude.js",
+    "badclaude-uninstall": "bin/uninstall.js"
   },
   "os": [
     "darwin",
@@ -19,7 +20,13 @@
     "electron",
     "tray",
     "overlay",
-    "cli"
+    "cli",
+    "claude",
+    "codex",
+    "copilot",
+    "aider",
+    "gemini",
+    "cursor"
   ],
   "repository": {
     "type": "git",
@@ -36,12 +43,14 @@
     "sounds",
     "icon",
     "bin/badclaude.js",
+    "bin/uninstall.js",
     "README.md"
   ],
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "pack": "npm pack"
+    "pack": "npm pack",
+    "uninstall": "badclaude-uninstall"
   },
   "dependencies": {
     "electron": "^33.0.0",

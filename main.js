@@ -4,6 +4,49 @@ const fs = require('fs');
 const os = require('os');
 const { execFile } = require('child_process');
 
+const APP_SLUG = 'badclaude';
+app.setName(APP_SLUG);
+
+// ── Agent types ──────────────────────────────────────────────────────────────
+const AGENT = {
+  CODEX_APP:    'codex-app',    // OpenAI Codex desktop app
+  CURSOR_APP:   'cursor-app',   // Cursor editor
+  WINDSURF_APP: 'windsurf-app', // Windsurf editor (Codeium)
+  CLAUDE_CLI:   'claude-cli',   // Claude Code CLI
+  CODEX_CLI:    'codex-cli',    // OpenAI Codex CLI
+  COPILOT_CLI:  'copilot-cli',  // GitHub Copilot CLI (gh copilot)
+  AIDER_CLI:    'aider-cli',    // Aider
+  GEMINI_CLI:   'gemini-cli',   // Google Gemini CLI
+  GENERIC:      'generic',      // fallback
+};
+
+// macOS bundle IDs for known agent desktop apps
+const BUNDLE_AGENTS = new Map([
+  ['com.openai.codex',             AGENT.CODEX_APP],
+  ['com.todesktop.230313mzl4w4u92', AGENT.CURSOR_APP],  // Cursor
+  ['com.codeium.windsurf',          AGENT.WINDSURF_APP],
+]);
+
+// macOS: known terminal emulator bundle IDs (used for CLI detection)
+const APPLE_TERMINAL_BUNDLE_ID = 'com.apple.Terminal';
+const KNOWN_TERMINAL_BUNDLE_IDS = new Set([
+  APPLE_TERMINAL_BUNDLE_ID,
+  'com.googlecode.iterm2',
+  'com.github.wez.wezterm',
+  'com.mitchellh.ghostty',
+  'dev.warp.Warp-Stable',
+  'co.zeit.hyper',
+]);
+
+// CLI agent process patterns – matched against process command lines
+const CLI_AGENT_PATTERNS = [
+  { regex: /(^|[/ ])claude(\s|$)/i,  type: AGENT.CLAUDE_CLI },
+  { regex: /(^|[/ ])codex(\s|$)/i,   type: AGENT.CODEX_CLI },
+  { regex: /gh\s+copilot/i,           type: AGENT.COPILOT_CLI },
+  { regex: /(^|[/ ])aider(\s|$)/i,   type: AGENT.AIDER_CLI },
+  { regex: /(^|[/ ])gemini(\s|$)/i,  type: AGENT.GEMINI_CLI },
+];
+
 // ── Win32 FFI (Windows only) ────────────────────────────────────────────────
 let keybd_event, VkKeyScanA;
 if (process.platform === 'win32') {
@@ -40,23 +83,18 @@ function refocusPreviousApp() {
       keybd_event(VK_TAB, 0, KEYUP, 0);
       keybd_event(VK_MENU, 0, KEYUP, 0);
     } else if (process.platform === 'darwin') {
-      const script = [
+      execFile('osascript', ['-e', [
         'tell application "System Events"',
         '  key down command',
         '  key code 48', // Tab
         '  key up command',
         'end tell',
-      ].join('\n');
-      execFile('osascript', ['-e', script], err => {
-        if (err) {
-          console.warn('refocus previous app (Cmd+Tab) failed:', err.message);
-        }
+      ].join('\n')], err => {
+        if (err) console.warn('refocus previous app (Cmd+Tab) failed:', err.message);
       });
     } else if (process.platform === 'linux') {
       execFile('xdotool', ['key', 'alt+Tab'], err => {
-        if (err) {
-          console.warn('refocus previous app (alt+Tab) failed – is xdotool installed?:', err.message);
-        }
+        if (err) console.warn('refocus previous app (alt+Tab) failed – is xdotool installed?:', err.message);
       });
     }
   };
@@ -72,7 +110,7 @@ function createTrayIconFallback() {
       return img;
     }
   }
-  console.warn('badclaude: icon/Template.png missing or invalid');
+  console.warn(`${APP_SLUG}: icon/Template.png missing or invalid`);
   return nativeImage.createEmpty();
 }
 
@@ -172,18 +210,33 @@ function toggleOverlay() {
 }
 
 // ── IPC ─────────────────────────────────────────────────────────────────────
-ipcMain.on('whip-crack', () => {
+function isTrustedOverlaySender(event) {
+  if (!overlay || overlay.isDestroyed()) return false;
+  const contents = overlay.webContents;
+  return !!contents && !contents.isDestroyed() && event.sender === contents;
+}
+
+function guardOverlayEvent(event, channel) {
+  if (isTrustedOverlaySender(event)) return true;
+  console.warn(`Ignoring ${channel} from unexpected renderer`);
+  return false;
+}
+
+ipcMain.on('whip-crack', event => {
+  if (!guardOverlayEvent(event, 'whip-crack')) return;
   try {
     sendMacro();
   } catch (err) {
     console.warn('sendMacro failed:', err?.message || err);
   }
 });
-ipcMain.on('hide-overlay', () => { if (overlay) overlay.hide(); });
+ipcMain.on('hide-overlay', event => {
+  if (!guardOverlayEvent(event, 'hide-overlay')) return;
+  if (overlay) overlay.hide();
+});
 
-// ── Macro: immediate Ctrl+C, type "Go FASER", Enter ───────────────────────
-function sendMacro() {
-  // Pick a random phrase from a list of similar phrases and type it out
+// ── Phrases ──────────────────────────────────────────────────────────────────
+function getRandomPhrase() {
   const phrases = [
     'FASTER',
     'FASTER',
@@ -193,14 +246,236 @@ function sendMacro() {
     'Work FASTER',
     'Speed it up clanker',
   ];
-  const chosen = phrases[Math.floor(Math.random() * phrases.length)];
+  return phrases[Math.floor(Math.random() * phrases.length)];
+}
 
+// ── macOS helpers ────────────────────────────────────────────────────────────
+function escapeAppleScriptString(text) {
+  return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function runAppleScript(script, cb) {
+  execFile('osascript', ['-e', script], (err, stdout) => {
+    cb(err, stdout ? stdout.trim() : '');
+  });
+}
+
+function runAppleScriptJavaScript(script, cb) {
+  execFile('osascript', ['-l', 'JavaScript', '-e', script], (err, stdout) => {
+    cb(err, stdout ? stdout.trim() : '');
+  });
+}
+
+/** Returns { name, bundleId } of the frontmost macOS application. */
+function getFrontmostAppMac(cb) {
+  runAppleScriptJavaScript([
+    'ObjC.import("AppKit");',
+    'const app = $.NSWorkspace.sharedWorkspace.frontmostApplication;',
+    'JSON.stringify({',
+    '  name: ObjC.unwrap(app.localizedName),',
+    '  bundleId: ObjC.unwrap(app.bundleIdentifier)',
+    '});',
+  ].join('\n'), (err, stdout) => {
+    if (err) return cb(err);
+    try { cb(null, JSON.parse(stdout)); } catch (e) { cb(e); }
+  });
+}
+
+function getFrontWindowTitleMac(appName, cb) {
+  runAppleScript([
+    'tell application "System Events"',
+    `  tell process "${escapeAppleScriptString(appName)}"`,
+    '    get name of front window',
+    '  end tell',
+    'end tell',
+  ].join('\n'), (err, stdout) => {
+    if (err) return cb(err);
+    cb(null, stdout);
+  });
+}
+
+/** Returns the tty path of the front Terminal tab (Apple Terminal only). */
+function getFrontTerminalTtyMac(appInfo, cb) {
+  if (appInfo.bundleId !== APPLE_TERMINAL_BUNDLE_ID) return cb(null, null);
+  runAppleScript([
+    'tell application "Terminal"',
+    '  if not (exists front window) then return ""',
+    '  get tty of selected tab of front window',
+    'end tell',
+  ].join('\n'), (err, stdout) => {
+    if (err) return cb(err);
+    cb(null, stdout || null);
+  });
+}
+
+/** Scan processes on a tty for known CLI agent patterns; returns agent type or null. */
+function checkTtyForAgentMac(tty, cb) {
+  if (!tty) return cb(null, null);
+  execFile('ps', ['-t', path.basename(tty), '-o', 'command='], (err, stdout) => {
+    if (err) return cb(err);
+    const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
+    for (const pat of CLI_AGENT_PATTERNS) {
+      if (lines.some(line => pat.regex.test(line))) return cb(null, pat.type);
+    }
+    cb(null, null);
+  });
+}
+
+/** Match window title against CLI agent patterns. */
+function checkTitleForAgent(title) {
+  if (!title) return null;
+  for (const pat of CLI_AGENT_PATTERNS) {
+    if (pat.regex.test(title)) return pat.type;
+  }
+  return null;
+}
+
+/**
+ * For a known terminal app, detect which CLI agent is running via tty/ps,
+ * falling back to window title inspection. Returns agent type or null.
+ */
+function detectCliAgentInTerminalMac(appInfo, cb) {
+  if (!KNOWN_TERMINAL_BUNDLE_IDS.has(appInfo.bundleId)) return cb(null, null);
+
+  getFrontTerminalTtyMac(appInfo, (ttyErr, tty) => {
+    if (ttyErr) console.warn('terminal tty lookup failed:', ttyErr.message);
+
+    const fallbackToTitle = () => {
+      getFrontWindowTitleMac(appInfo.name, (titleErr, title) => {
+        if (titleErr) return cb(titleErr);
+        cb(null, checkTitleForAgent(title));
+      });
+    };
+
+    if (!tty) return fallbackToTitle();
+
+    checkTtyForAgentMac(tty, (psErr, agentType) => {
+      if (psErr) {
+        console.warn('tty agent detection failed:', psErr.message);
+        return fallbackToTitle();
+      }
+      if (agentType) return cb(null, agentType);
+      fallbackToTitle();
+    });
+  });
+}
+
+/**
+ * Detect the active agent on macOS.
+ * Checks bundle ID first (agent desktop apps), then terminal CLI processes.
+ * Returns AGENT.* string via callback.
+ */
+function detectAgentMac(cb) {
+  getFrontmostAppMac((err, appInfo) => {
+    if (err || !appInfo) {
+      console.warn('frontmost app lookup failed:', err?.message || err);
+      return cb(AGENT.GENERIC);
+    }
+
+    const bundleAgent = BUNDLE_AGENTS.get(appInfo.bundleId);
+    if (bundleAgent) return cb(bundleAgent);
+
+    detectCliAgentInTerminalMac(appInfo, (detectErr, agentType) => {
+      if (detectErr) {
+        console.warn('CLI agent detection failed:', detectErr.message);
+        return cb(AGENT.GENERIC);
+      }
+      cb(agentType || AGENT.GENERIC);
+    });
+  });
+}
+
+/**
+ * Detect the active agent on Linux by scanning `ps aux` for known CLI patterns.
+ * Returns AGENT.* string via callback.
+ */
+function detectAgentLinux(cb) {
+  execFile('ps', ['aux'], (err, stdout) => {
+    if (err) return cb(AGENT.GENERIC);
+    const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
+    for (const pat of CLI_AGENT_PATTERNS) {
+      if (lines.some(line => pat.regex.test(line))) return cb(pat.type);
+    }
+    cb(AGENT.GENERIC);
+  });
+}
+
+// ── macOS macro primitives ───────────────────────────────────────────────────
+/** Interrupt (Cmd+C) the frontmost app, then type text + Enter. */
+function macInterruptAndType(text) {
+  runAppleScript([
+    'tell application "System Events"',
+    '  key code 8 using {command down}',  // Cmd+C (interrupt)
+    '  delay 0.05',
+    `  keystroke "${escapeAppleScriptString(text)}"`,
+    '  key code 36',                       // Enter
+    'end tell',
+  ].join('\n'), err => {
+    if (err) console.warn('mac interrupt+type macro failed (enable Accessibility):', err.message);
+  });
+}
+
+/** Type text + Enter with no interrupt. For agents that accept follow-ups. */
+function macTypeAndEnter(text) {
+  runAppleScript([
+    'tell application "System Events"',
+    '  delay 0.03',
+    `  keystroke "${escapeAppleScriptString(text)}"`,
+    '  key code 36',  // Enter
+    'end tell',
+  ].join('\n'), err => {
+    if (err) console.warn('mac type+enter macro failed (enable Accessibility):', err.message);
+  });
+}
+
+/** Type text + Cmd+Enter. For Codex app steer command. */
+function macTypeAndCmdEnter(text) {
+  runAppleScript([
+    'tell application "System Events"',
+    '  delay 0.03',
+    `  keystroke "${escapeAppleScriptString(text)}"`,
+    '  key code 36 using {command down}',  // Cmd+Enter (steer)
+    'end tell',
+  ].join('\n'), err => {
+    if (err) console.warn('mac type+cmd+enter macro failed (enable Accessibility):', err.message);
+  });
+}
+
+// ── Linux macro primitives (xdotool) ────────────────────────────────────────
+function xdotoolTypeAndReturn(text, cb) {
+  execFile('xdotool', ['type', '--clearmodifiers', '--delay', '20', text], err => {
+    if (err) { console.warn('xdotool type failed:', err.message); return cb && cb(err); }
+    execFile('xdotool', ['key', 'Return'], err => {
+      if (err) console.warn('xdotool Return failed:', err.message);
+      cb && cb(err || null);
+    });
+  });
+}
+
+function linuxInterruptAndType(text) {
+  // Requires xdotool: sudo apt install xdotool  (X11; Wayland users need ydotool)
+  execFile('xdotool', ['key', 'ctrl+c'], err => {
+    if (err) {
+      console.warn('xdotool ctrl+c failed – is xdotool installed?:', err.message);
+      return;
+    }
+    xdotoolTypeAndReturn(text);
+  });
+}
+
+function linuxTypeAndEnter(text) {
+  xdotoolTypeAndReturn(text);
+}
+
+// ── Main macro dispatcher ───────────────────────────────────────────────────
+function sendMacro() {
+  const text = getRandomPhrase();
   if (process.platform === 'win32') {
-    sendMacroWindows(chosen);
+    sendMacroWindows(text);
   } else if (process.platform === 'darwin') {
-    sendMacroMac(chosen);
+    sendMacroMac(text);
   } else if (process.platform === 'linux') {
-    sendMacroLinux(chosen);
+    sendMacroLinux(text);
   }
 }
 
@@ -231,39 +506,37 @@ function sendMacroWindows(text) {
 }
 
 function sendMacroMac(text) {
-  const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const script = [
-    'tell application "System Events"',
-    '  key code 8 using {command down}', // Cmd+C
-    '  delay 0.03',
-    `  keystroke "${escaped}"`,
-    '  key code 36', // Enter
-    'end tell'
-  ].join('\n');
-
-  execFile('osascript', ['-e', script], err => {
-    if (err) {
-      console.warn('mac macro failed (enable Accessibility for terminal/app):', err.message);
+  detectAgentMac(agentType => {
+    switch (agentType) {
+      case AGENT.CODEX_APP:
+        macTypeAndCmdEnter(text);  // Codex app: type + Cmd+Enter (steer)
+        break;
+      case AGENT.CURSOR_APP:
+      case AGENT.WINDSURF_APP:
+        macTypeAndEnter(text);     // Editor chat: type + Enter (no interrupt)
+        break;
+      case AGENT.CODEX_CLI:
+        macTypeAndEnter(text);     // Codex CLI: follow-up without interrupt
+        break;
+      default:
+        // Claude CLI, Copilot CLI, Aider, Gemini CLI, generic: interrupt + type
+        macInterruptAndType(text);
+        break;
     }
   });
 }
 
 function sendMacroLinux(text) {
-  // Requires xdotool: sudo apt install xdotool  (X11 only; Wayland users need ydotool)
-  execFile('xdotool', ['key', 'ctrl+c'], err => {
-    if (err) {
-      console.warn('xdotool ctrl+c failed – is xdotool installed?:', err.message);
-      return;
+  detectAgentLinux(agentType => {
+    switch (agentType) {
+      case AGENT.CODEX_CLI:
+        linuxTypeAndEnter(text);   // Codex CLI: follow-up without interrupt
+        break;
+      default:
+        // Claude CLI, Copilot CLI, Aider, Gemini CLI, generic: interrupt + type
+        linuxInterruptAndType(text);
+        break;
     }
-    execFile('xdotool', ['type', '--clearmodifiers', '--delay', '20', text], err => {
-      if (err) {
-        console.warn('xdotool type failed:', err.message);
-        return;
-      }
-      execFile('xdotool', ['key', 'Return'], err => {
-        if (err) console.warn('xdotool Return failed:', err.message);
-      });
-    });
   });
 }
 
