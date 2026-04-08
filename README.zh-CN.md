@@ -10,11 +10,16 @@ WORK_Faster_WORK 是一款跨平台桌面托盘应用，能够自动检测你当
 
 ## 安装
 
-**任何平台，一条命令：**
+本项目是 fork，尚未发布到 npm，请直接从 GitHub 安装：
 
 ```bash
-npm install -g work-faster-work && work-faster-work
+npm install -g SnifferCaptain/WORK_Faster_WORK#copilot/make-it-cross-platform && work-faster-work
 ```
+
+> **提示：** 待该分支合并至默认分支后，命令可简化为：
+> ```bash
+> npm install -g SnifferCaptain/WORK_Faster_WORK && work-faster-work
+> ```
 
 ### 前置要求
 
@@ -36,7 +41,7 @@ work-faster-work-uninstall
 或手动执行：
 
 ```bash
-npm uninstall -g work-faster-work
+npm uninstall -g SnifferCaptain/WORK_Faster_WORK
 ```
 
 ## 操作方式
@@ -88,6 +93,24 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 | **GitHub Copilot Chat（VS Code 扩展）** | 嵌入在 VS Code 中，无独立进程或中断入口 |
 | **Cursor / Windsurf 行内补全** | 行内补全无聊天输入框，无法中断 |
 
+## 鞭子计数器
+
+WORK_Faster_WORK 会记录每一次鞭子挥动，并持久化保存。
+
+- 当前次数始终显示在**托盘菜单**中（右键点击托盘图标）。
+- 每当次数达到 **2 的幂次**（1、2、4、8、16、32、…），都会在鼠标位置触发里程碑特效：
+  - **n=0（第 1 次）：** 金色星星闪耀
+  - **n=1（第 2 次）：** 糖果色粒子爆发
+  - **n=2（第 4 次）：** 烟花风格火花
+  - **n=3（第 8 次）：** 霓虹光环爆炸
+  - **n=4（第 16 次）：** 彩虹烟花 + 屏幕闪光
+  - **n=5+（第 32 次+）：** 越来越狂野的粒子盛宴
+
+计数文件存储位置：
+- **macOS：** `~/Library/Application Support/work-faster-work/whip-count.json`
+- **Linux：** `~/.config/work-faster-work/whip-count.json`
+- **Windows：** `%APPDATA%\work-faster-work\whip-count.json`
+
 ## 自定义激励语句
 
 你可以用自己的话替换内置消息。点击托盘菜单中的 **"Open Config Folder"**，它会打开配置目录并自动为你生成 `config.jsonc` 模板文件。
@@ -120,6 +143,7 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 - [x] 多 Agent 支持（Claude、Codex、Copilot、Cursor、Windsurf、Aider、Gemini、通义灵码、Trae 等）
 - [x] 一键安装与卸载
 - [x] 可自定义激励语句（`config.jsonc`）
-- [ ] 记录你抽了多少次鞭子
+- [x] 记录你抽了多少次鞭子（持久化到磁盘，托盘菜单实时显示）
+- [x] 每累计到 2^n 次时触发里程碑特效（随 n 增大特效越来越华丽：金色星星 → 彩色粒子 → 烟花 → 彩虹爆炸 → 全屏狂欢）
 - [ ] 更新鞭子物理效果
 - [ ] Windows Agent 检测

@@ -10,11 +10,16 @@ WORK_Faster_WORK is a cross-platform desktop tray app that detects which AI codi
 
 ## Install
 
-**One command, any platform:**
+Since this fork is not yet published to npm, install directly from GitHub:
 
 ```bash
-npm install -g work-faster-work && work-faster-work
+npm install -g SnifferCaptain/WORK_Faster_WORK#copilot/make-it-cross-platform && work-faster-work
 ```
+
+> **Note:** Once this branch is merged to the default branch, the command simplifies to:
+> ```bash
+> npm install -g SnifferCaptain/WORK_Faster_WORK && work-faster-work
+> ```
 
 ### Prerequisites
 
@@ -36,7 +41,7 @@ work-faster-work-uninstall
 Or manually:
 
 ```bash
-npm uninstall -g work-faster-work
+npm uninstall -g SnifferCaptain/WORK_Faster_WORK
 ```
 
 ## Controls
@@ -88,6 +93,24 @@ WORK_Faster_WORK auto-detects which agent is running and sends the correct keybo
 | **GitHub Copilot Chat (VS Code extension)** | Embedded in VS Code; no standalone process or interrupt endpoint |
 | **Cursor / Windsurf inline completions** | Completions do not have a chat input to interrupt |
 
+## Whip counter
+
+WORK_Faster_WORK counts every whip crack and persists the total across sessions.
+
+- The current count is always visible in the **tray menu** (right-click the tray icon).
+- Every time the count hits a **power of two** (1, 2, 4, 8, 16, 32, …), a milestone visual effect bursts at your cursor:
+  - **n=0 (1 crack):** golden star sparkle
+  - **n=1 (2 cracks):** candy-colored burst
+  - **n=2 (4 cracks):** firework-style sparks
+  - **n=3 (8 cracks):** neon ring explosion
+  - **n=4 (16 cracks):** rainbow fireworks + screen flash
+  - **n=5+ (32+):** increasingly wild, more particles, more rings, more chaos
+
+The count is stored at:
+- **macOS:** `~/Library/Application Support/work-faster-work/whip-count.json`
+- **Linux:** `~/.config/work-faster-work/whip-count.json`
+- **Windows:** `%APPDATA%\work-faster-work\whip-count.json`
+
 ## Customizing phrases
 
 You can replace the built-in messages with your own. Click **"Open Config Folder"** in the tray menu — it will open the config directory and create a `config.jsonc` template for you.
@@ -118,7 +141,8 @@ The bundled default config is at [`config.default.jsonc`](config.default.jsonc).
 - [x] Multi-agent support (Claude, Codex, Copilot, Cursor, Windsurf, Aider, Gemini, Qwen, Trae, …)
 - [x] One-click install & uninstall
 - [x] Customizable phrases via `config.jsonc`
-- [ ] Logs of how many times you whipped the agent
+- [x] Logs of how many times you whipped the agent (whip crack counter, persisted to disk)
+- [x] Milestone visual effects at every 2^n cracks (escalating from sparkles → confetti → fireworks → rainbow → full chaos)
 - [ ] Updated whip physics
 - [ ] Windows agent detection
 

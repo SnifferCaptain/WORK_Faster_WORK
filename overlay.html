@@ -427,10 +427,241 @@ function draw() {
   }
 }
 
+// ── Milestone particle effects ───────────────────────────────────────────────
+// Triggered when whip crack count hits a power of two (2^n).
+// Effects scale from a small golden sparkle at n=0 up to full fireworks at n≥6.
+
+const MILESTONE_PALETTES = [
+  ['#FFD700', '#FFA500', '#FFEC8B', '#FFFACD'],                       // n=0  gold
+  ['#FF69B4', '#00CED1', '#7FFF00', '#FF4500', '#DA70D6'],            // n=1  candy
+  ['#FF3300', '#FF8C00', '#FFD700', '#7CFC00', '#1E90FF', '#9400D3'], // n=2  firework
+  ['#00FFFF', '#FF00FF', '#FFD700', '#00FF7F', '#FF1493', '#FFFFFF'], // n=3  neon
+  ['#FF0000','#FF7F00','#FFFF00','#00FF00','#00BFFF','#8B00FF','#FF69B4'], // n=4 rainbow
+  ['#FFD700','#FF6347','#00FF7F','#00BFFF','#FF00FF','#FFFFFF','#FF4500'], // n=5 vivid
+];
+
+function mPalette(level) {
+  return MILESTONE_PALETTES[Math.min(level, MILESTONE_PALETTES.length - 1)];
+}
+
+let milestoneEffects = [];   // array of burst / ring / flash / label objects
+
+// Maximum particle count cap (prevents frame-rate drops at very high levels)
+const MAX_MILESTONE_PARTICLES = 350;
+
+/**
+ * Create a particle burst (and optional rings / label) at (x, y) for the
+ * given milestone level n (count = 2^n).
+ */
+function spawnMilestoneEffect(x, y, level, count) {
+  const palette   = mPalette(level);
+  const baseCount = Math.min(8 * (1 << level), MAX_MILESTONE_PARTICLES);
+  const speed     = 3.5 + level * 1.4;
+  const lifeBase  = 70 + level * 22;
+  const gravity   = 0.10 + level * 0.018;
+
+  // ── Particle burst ────────────────────────────────────────
+  const particles = [];
+  for (let i = 0; i < baseCount; i++) {
+    const angle  = (i / baseCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+    const spd    = speed * (0.5 + Math.random() * 0.9);
+    const color  = palette[i % palette.length];
+    const pLife  = lifeBase * (0.7 + Math.random() * 0.6);
+    // type: n=0–1 → golden stars; n=2 → pure spark shower (firework look);
+    //        n≥3  → sparks with 1-in-4 confetti ribbons for extra texture
+    const type = (level < 2) ? 'star'
+               : (level >= 3 && i % 4 === 0) ? 'confetti'
+               : 'spark';
+    particles.push({
+      x, y, px: x, py: y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd - (level >= 2 ? 1.5 : 0),
+      life: pLife, maxLife: pLife,
+      color,
+      size: 2 + level * 0.55 + Math.random() * 2.5,
+      angle: Math.random() * Math.PI * 2,
+      spin: (Math.random() - 0.5) * 0.25,
+      type, gravity,
+    });
+  }
+  milestoneEffects.push({ kind: 'burst', particles });
+
+  // ── Expanding rings (n≥1) ────────────────────────────────
+  const rings = Math.min(level, 4);
+  for (let r = 0; r < rings; r++) {
+    const delay = r * 6;
+    milestoneEffects.push({
+      kind: 'ring', x, y,
+      radius: 0, maxRadius: 55 + level * 28 + r * 20,
+      life: 50 + r * 5, maxLife: 50 + r * 5,
+      color: palette[r % palette.length],
+      delay,
+    });
+  }
+
+  // ── Screen flash (n≥4) ───────────────────────────────────
+  if (level >= 4) {
+    milestoneEffects.push({
+      kind: 'flash',
+      life: 14 + level * 2, maxLife: 14 + level * 2,
+      color: palette[0],
+    });
+  }
+
+  // ── Floating label ──────────────────────────────────────
+  milestoneEffects.push({
+    kind: 'label',
+    x, y: y - 30,
+    text: `✦ ${count} CRACKS ✦`,
+    life: 90 + level * 10, maxLife: 90 + level * 10,
+    vy: -0.9 - level * 0.15,
+    color: palette[0],
+    fontSize: 14 + level * 2,
+  });
+}
+
+function updateMilestoneEffects() {
+  for (let i = milestoneEffects.length - 1; i >= 0; i--) {
+    const e = milestoneEffects[i];
+
+    if (e.kind === 'ring') {
+      if (e.delay > 0) { e.delay--; continue; }
+      e.radius += (e.maxRadius - e.radius) * 0.18;
+      e.life--;
+      if (e.life <= 0) { milestoneEffects.splice(i, 1); }
+      continue;
+    }
+
+    if (e.kind === 'flash') {
+      e.life--;
+      if (e.life <= 0) { milestoneEffects.splice(i, 1); }
+      continue;
+    }
+
+    if (e.kind === 'label') {
+      e.y += e.vy;
+      e.life--;
+      if (e.life <= 0) { milestoneEffects.splice(i, 1); }
+      continue;
+    }
+
+    // burst
+    let allDead = true;
+    for (const p of e.particles) {
+      if (p.life <= 0) continue;
+      allDead = false;
+      p.px = p.x; p.py = p.y;
+      p.x  += p.vx; p.y  += p.vy;
+      p.vy += p.gravity;
+      p.vx *= 0.97; p.vy *= 0.97;
+      p.angle += p.spin;
+      p.life  -= 1;
+    }
+    if (allDead) milestoneEffects.splice(i, 1);
+  }
+}
+
+function drawMilestoneStar(cx, cy, spikes, outerR, innerR, rot) {
+  const step = Math.PI / spikes;
+  let a = (Math.PI / 2) * 3 + rot;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - outerR);
+  for (let i = 0; i < spikes; i++) {
+    ctx.lineTo(cx + Math.cos(a) * outerR, cy + Math.sin(a) * outerR);
+    a += step;
+    ctx.lineTo(cx + Math.cos(a) * innerR, cy + Math.sin(a) * innerR);
+    a += step;
+  }
+  ctx.closePath();
+}
+
+function drawMilestoneEffects() {
+  ctx.save();
+  for (const e of milestoneEffects) {
+
+    if (e.kind === 'flash') {
+      const alpha = (e.life / e.maxLife) * 0.18;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = e.color;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+      continue;
+    }
+
+    if (e.kind === 'ring') {
+      if (e.delay > 0) continue;
+      const alpha = e.life / e.maxLife;
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth   = 3 * alpha;
+      ctx.shadowColor = e.color;
+      ctx.shadowBlur  = 8;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      continue;
+    }
+
+    if (e.kind === 'label') {
+      const alpha = Math.min(1, e.life / e.maxLife * 2);
+      ctx.globalAlpha = alpha;
+      ctx.font = `bold ${e.fontSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur  = 4;
+      ctx.fillStyle   = e.color;
+      ctx.fillText(e.text, e.x, e.y);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      continue;
+    }
+
+    // burst
+    for (const p of e.particles) {
+      if (p.life <= 0) continue;
+      const alpha = p.life / p.maxLife;
+      ctx.globalAlpha = alpha;
+
+      if (p.type === 'spark') {
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth   = p.size * alpha;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur  = 4;
+        ctx.beginPath();
+        ctx.moveTo(p.px, p.py);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      } else if (p.type === 'confetti') {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.angle);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size * 0.4, -p.size * 1.4, p.size * 0.8, p.size * 2.8);
+        ctx.restore();
+      } else {
+        // star
+        ctx.fillStyle   = p.color;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur  = 6;
+        drawMilestoneStar(p.x, p.y, 5, p.size, p.size * 0.45, p.angle);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 // ── Main loop ───────────────────────────────────────────────────────────────
 function loop() {
   update();
+  updateMilestoneEffects();
   draw();
+  drawMilestoneEffects();
   requestAnimationFrame(loop);
 }
 loop();
@@ -447,6 +678,10 @@ window.bridge.onSpawnWhip(() => {
 
 window.bridge.onDropWhip(() => {
   if (whip && !dropping) dropping = true;
+});
+
+window.bridge.onMilestoneEffect(({ level, count }) => {
+  spawnMilestoneEffect(mouseX || W / 2, mouseY || H / 2, level, count);
 });
 
 </script>

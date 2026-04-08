@@ -82,6 +82,7 @@ if (process.platform === 'win32') {
 let tray, overlay;
 let overlayReady = false;
 let spawnQueued = false;
+let whipCount = 0;  // total lifetime whip cracks
 
 const VK_CONTROL = 0x11;
 const VK_RETURN  = 0x0D;
@@ -252,6 +253,20 @@ ipcMain.on('whip-crack', event => {
   } catch (err) {
     console.warn('sendMacro failed:', err?.message || err);
   }
+
+  // Track lifetime crack count and fire milestone effects at powers of two
+  whipCount += 1;
+  saveWhipCount();
+  updateTrayMenu();
+
+  if (isPowerOfTwo(whipCount)) {
+    // Use Math.clz32 (count leading zeros) to get exact integer log2 without
+    // floating-point rounding: 31 - clz32(1)=0, 31 - clz32(2)=1, etc.
+    const level = 31 - Math.clz32(whipCount);
+    if (overlay && !overlay.isDestroyed() && overlayReady) {
+      overlay.webContents.send('milestone-effect', { level, count: whipCount });
+    }
+  }
 });
 ipcMain.on('hide-overlay', event => {
   if (!guardOverlayEvent(event, 'hide-overlay')) return;
@@ -309,6 +324,65 @@ function loadConfig() {
 function getRandomPhrase() {
   const phrases = (configPhrases && configPhrases.length > 0) ? configPhrases : DEFAULT_PHRASES;
   return phrases[Math.floor(Math.random() * phrases.length)];
+}
+
+// ── Whip count ───────────────────────────────────────────────────────────────
+const WHIP_COUNT_FILE = () => path.join(app.getPath('userData'), 'whip-count.json');
+
+function loadWhipCount() {
+  try {
+    const file = WHIP_COUNT_FILE();
+    if (fs.existsSync(file)) {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (typeof data.count === 'number' && Number.isInteger(data.count) && data.count >= 0) {
+        whipCount = data.count;
+      }
+    }
+  } catch (e) {
+    console.warn(`[${APP_SLUG}] Failed to load whip count:`, e.message);
+  }
+}
+
+function saveWhipCount() {
+  try {
+    const dir = app.getPath('userData');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(WHIP_COUNT_FILE(), JSON.stringify({ count: whipCount }));
+  } catch (e) {
+    console.warn(`[${APP_SLUG}] Failed to save whip count:`, e.message);
+  }
+}
+
+/** Returns true if n is a positive power of two (1, 2, 4, 8, …). */
+function isPowerOfTwo(n) {
+  return n > 0 && (n & (n - 1)) === 0;
+}
+
+/** Rebuild tray context menu (call after whipCount changes). */
+function updateTrayMenu() {
+  if (!tray || tray.isDestroyed()) return;
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: `Whip cracks: ${whipCount}`, enabled: false },
+      { type: 'separator' },
+      {
+        label: 'Open Config Folder',
+        click: () => {
+          const configDir = app.getPath('userData');
+          fs.mkdirSync(configDir, { recursive: true });
+          const dest = path.join(configDir, 'config.jsonc');
+          if (!fs.existsSync(dest)) {
+            const src = path.join(__dirname, 'config.default.jsonc');
+            if (fs.existsSync(src)) fs.copyFileSync(src, dest);
+          }
+          const { shell } = require('electron');
+          shell.openPath(configDir);
+        },
+      },
+      { type: 'separator' },
+      { label: 'Quit', click: () => app.quit() },
+    ])
+  );
 }
 
 // ── macOS helpers ────────────────────────────────────────────────────────────
@@ -612,31 +686,11 @@ function sendMacroLinux(text) {
 // ── App lifecycle ───────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   loadConfig();
+  loadWhipCount();
 
   tray = new Tray(await getTrayIcon());
   tray.setToolTip('WORK Faster WORK – click for whip');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      {
-        label: 'Open Config Folder',
-        click: () => {
-          const configDir = app.getPath('userData');
-          // Ensure the dir exists so the user can drop a config.jsonc in it
-          fs.mkdirSync(configDir, { recursive: true });
-          // Copy default config as a template if none exists yet
-          const dest = path.join(configDir, 'config.jsonc');
-          if (!fs.existsSync(dest)) {
-            const src = path.join(__dirname, 'config.default.jsonc');
-            if (fs.existsSync(src)) fs.copyFileSync(src, dest);
-          }
-          const { shell } = require('electron');
-          shell.openPath(configDir);
-        },
-      },
-      { type: 'separator' },
-      { label: 'Quit', click: () => app.quit() },
-    ])
-  );
+  updateTrayMenu();
   tray.on('click', toggleOverlay);
 });
 
