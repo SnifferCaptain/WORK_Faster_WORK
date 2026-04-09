@@ -588,6 +588,8 @@ function detectAgentLinux(cb) {
     const candidates = [];
     for (const pat of CLI_AGENT_PATTERNS) {
       for (const line of lines) {
+        // Expected format from `ps -eo tty,pid,args --no-headers`:
+        // "<TTY> <PID> <COMMAND...>"
         const m = line.match(/^(\S+)\s+(\d+)\s+(.*)$/);
         if (!m) continue;
         const tty = m[1];
@@ -691,7 +693,7 @@ function notifyLinuxMacroFailure(toolName, err) {
   const setupHint = toolName === 'ydotool'
     ? 'Wayland detected. Install ydotool and ensure ydotoold is running.'
     : 'Install xdotool (X11), or run under Wayland with ydotool + ydotoold.';
-  notifyMacroSendFailed(err, `${toolName} command failed:\n${setupHint}\nRoot error:`);
+  notifyMacroSendFailed(err, `${toolName} command failed. ${setupHint} Root error:`);
 }
 
 function execLinuxMacro(toolName, args, label, cb) {
@@ -710,6 +712,7 @@ function xdotoolTypeAndReturn(text, cb) {
   if (toolName === 'ydotool') {
     execLinuxMacro('ydotool', ['type', '--key-delay', '20', text], 'type', err => {
       if (err) return cb && cb(err);
+      // Linux input-event keycode 28 = KEY_ENTER.
       execLinuxMacro('ydotool', ['key', '28:1', '28:0'], 'Return', keyErr => {
         cb && cb(keyErr || null);
       });
@@ -727,6 +730,7 @@ function xdotoolTypeAndReturn(text, cb) {
 
 function linuxInterruptAndType(text) {
   const toolName = getLinuxMacroBackend();
+  // Linux input-event keycodes: 29 = KEY_LEFTCTRL, 46 = KEY_C.
   const ctrlCArgs = toolName === 'ydotool'
     ? ['key', '29:1', '46:1', '46:0', '29:0']
     : ['key', 'ctrl+c'];
