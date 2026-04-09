@@ -681,7 +681,14 @@ function notifyUser(title, body) {
 }
 
 function isWaylandSession() {
-  return process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY;
+  // XDG_SESSION_TYPE is the most reliable indicator; check it first so that
+  // XWayland sessions (XDG_SESSION_TYPE=x11 + WAYLAND_DISPLAY set) still use
+  // xdotool rather than ydotool.  Fall back to WAYLAND_DISPLAY when the
+  // variable is absent (e.g. some minimal setups).
+  if (process.env.XDG_SESSION_TYPE) {
+    return process.env.XDG_SESSION_TYPE === 'wayland';
+  }
+  return !!process.env.WAYLAND_DISPLAY;
 }
 
 function getLinuxMacroBackend() {
@@ -715,7 +722,7 @@ function xdotoolTypeAndReturn(text, cb) {
   if (toolName === 'ydotool') {
     execLinuxMacro('ydotool', ['type', '--key-delay', '20', text], 'type', err => {
       if (err) return cb && cb(err);
-      // Linux input-event keycode 28 = KEY_ENTER.
+      // Linux input-event keycodes: 28 = KEY_ENTER.
       execLinuxMacro('ydotool', ['key', `${YDOTOOL_KEY_ENTER}:1`, `${YDOTOOL_KEY_ENTER}:0`], 'Return', keyErr => {
         cb && cb(keyErr || null);
       });
