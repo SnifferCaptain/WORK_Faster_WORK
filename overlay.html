@@ -447,7 +447,7 @@ function mPalette(level) {
 let milestoneEffects = [];   // array of burst / ring / flash / label objects
 
 // Maximum particle count cap (prevents frame-rate drops at very high levels)
-const MAX_MILESTONE_PARTICLES = 350;
+const MAX_MILESTONE_PARTICLES = 200;
 
 /**
  * Create a particle burst (and optional rings / label) at (x, y) for the
@@ -455,7 +455,9 @@ const MAX_MILESTONE_PARTICLES = 350;
  */
 function spawnMilestoneEffect(x, y, level, count) {
   const palette   = mPalette(level);
-  const baseCount = Math.min(8 * (1 << level), MAX_MILESTONE_PARTICLES);
+  // Cap the exponent at level 4 (128 particles) so count doesn't grow to 350+
+  // at high levels and cause frame-rate drops.
+  const baseCount = Math.min(8 * (1 << Math.min(level, 4)), MAX_MILESTONE_PARTICLES);
   const speed     = 3.5 + level * 1.4;
   const lifeBase  = 70 + level * 22;
   const gravity   = 0.10 + level * 0.018;
@@ -609,11 +611,8 @@ function drawMilestoneEffects() {
       ctx.globalAlpha = alpha;
       ctx.font = `bold ${e.fontSize}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.shadowColor = '#000';
-      ctx.shadowBlur  = 4;
       ctx.fillStyle   = e.color;
       ctx.fillText(e.text, e.x, e.y);
-      ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
       continue;
     }
@@ -627,13 +626,10 @@ function drawMilestoneEffects() {
       if (p.type === 'spark') {
         ctx.strokeStyle = p.color;
         ctx.lineWidth   = p.size * alpha;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur  = 4;
         ctx.beginPath();
         ctx.moveTo(p.px, p.py);
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
-        ctx.shadowBlur = 0;
       } else if (p.type === 'confetti') {
         ctx.save();
         ctx.translate(p.x, p.y);
@@ -644,11 +640,8 @@ function drawMilestoneEffects() {
       } else {
         // star
         ctx.fillStyle   = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur  = 6;
         drawMilestoneStar(p.x, p.y, 5, p.size, p.size * 0.45, p.angle);
         ctx.fill();
-        ctx.shadowBlur = 0;
       }
     }
   }

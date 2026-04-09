@@ -70,20 +70,20 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 
 ### CLI Agent（全平台 — 通过进程名检测）
 
-| Agent | 进程名 | 中断支持 | 发送的宏 | 状态 |
+| Agent | 进程名 | 中断方式 | 发送的宏 | 状态 |
 |---|---|---|---|---|
-| **Claude Code** | `claude` | ✅ 支持（Ctrl+C）| 中断 + 文本 + Enter | ✅ 已测试 |
-| **OpenAI Codex CLI** | `codex` | ✅ 跟进模式 | 文本 + Enter | ✅ 已测试 |
-| **GitHub Copilot CLI** | `gh copilot` | ✅ 支持 | 中断 + 文本 + Enter | ✅ 已测试 |
-| **Aider** | `aider` | ✅ 支持 | 中断 + 文本 + Enter | ✅ 已测试 |
-| **Gemini CLI** | `gemini` | ✅ 支持 | 中断 + 文本 + Enter | ✅ 已测试 |
-| **Qwen Code**（通义灵码）| `qwen`、`qwen-code`、`qwen-coder`、`tongyi` | ✅ 支持 | 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
-| **Trae**（字节跳动 CLI）| `trae` | ✅ 支持 | 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
-| **Open Claw** | `openclaw`、`open-claw` | ❓ 未知 | 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
-| **Antigravity** | `antigravity` | ❓ 未知 | 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
-| **Qoder** | `qoder` | ❓ 未知 | 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
-| **Copaw** | `copaw` | ❓ 未知 | 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
-| **其他 / 兜底** | — | — | 中断 + 文本 + Enter | — |
+| **Claude Code** | `claude` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ✅ 已测试 |
+| **OpenAI Codex CLI** | `codex` | 无中断（直接跟进）| 文本 + Enter | ✅ 已测试 |
+| **GitHub Copilot CLI** | `gh copilot` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ✅ 已测试 |
+| **Aider** | `aider` | Ctrl+C（全平台）| 中断 + 文本 + Enter | ✅ 已测试 |
+| **Gemini CLI** | `gemini` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ✅ 已测试 |
+| **Qwen Code**（通义灵码）| `qwen`、`qwen-code`、`qwen-coder`、`tongyi` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
+| **Trae**（字节跳动 CLI）| `trae` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
+| **Open Claw** | `openclaw`、`open-claw` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
+| **Antigravity** | `antigravity` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
+| **Qoder** | `qoder` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
+| **Copaw** | `copaw` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
+| **其他 / 兜底** | — | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | — |
 
 > **macOS：** 终端进程检测优先通过 TTY（`ps -t <tty>`，适用于 Apple Terminal），其他终端模拟器（iTerm2、WezTerm、Ghostty、Warp、Hyper）则通过窗口标题兜底。
 
@@ -93,7 +93,7 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 
 > **Overlay 覆盖范围：** overlay 会覆盖所有显示器组成的虚拟桌面，而不只主屏幕。
 
-> **Windows：** 暂未实现进程检测，所有 Agent 均使用兜底宏（Ctrl+C + 文本 + Enter）。
+> **Windows：** 通过 PowerShell（`Get-WmiObject Win32_Process`）检测当前运行的 Agent。宏策略因 Agent 而异：Codex CLI 直接发送跟进消息（无中断）；Aider 使用 Ctrl+C（它会显示 Y/N 确认，不会立即退出）；其他所有 CLI（Claude Code、Gemini、Copilot、通义灵码等）使用 Escape 中止当前流式输出而不退出程序。文字始终通过剪贴板粘贴（Ctrl+V）发送，因此支持中文等 Unicode 字符，且连续挥鞭时不会丢失开头字符。
 
 ### 已知不兼容的 Agent
 
@@ -155,4 +155,4 @@ WORK_Faster_WORK 会记录每一次鞭子挥动，并持久化保存。
 - [x] 记录你抽了多少次鞭子（持久化到磁盘，托盘菜单实时显示）
 - [x] 每累计到 2^n 次时触发里程碑特效（随 n 增大特效越来越华丽：金色星星 → 彩色粒子 → 烟花 → 彩虹爆炸 → 全屏狂欢）
 - [ ] 更新鞭子物理效果
-- [ ] Windows Agent 检测
+- [x] Windows Agent 检测

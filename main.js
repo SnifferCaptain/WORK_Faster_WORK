@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, dialog, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, dialog, Notification, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -66,13 +66,12 @@ const CLI_AGENT_PATTERNS = [
 ];
 
 // ── Win32 FFI (Windows only) ────────────────────────────────────────────────
-let keybd_event, VkKeyScanA;
+let keybd_event;
 if (process.platform === 'win32') {
   try {
     const koffi = require('koffi');
     const user32 = koffi.load('user32.dll');
     keybd_event = user32.func('void __stdcall keybd_event(uint8_t bVk, uint8_t bScan, uint32_t dwFlags, uintptr_t dwExtraInfo)');
-    VkKeyScanA = user32.func('int16_t __stdcall VkKeyScanA(int ch)');
   } catch (e) {
     console.warn('koffi not available – macro sending disabled', e.message);
   }
@@ -87,6 +86,8 @@ let whipCount = 0;  // total lifetime whip cracks
 const VK_CONTROL = 0x11;
 const VK_RETURN  = 0x0D;
 const VK_C       = 0x43;
+const VK_V       = 0x56;
+const VK_ESCAPE  = 0x1B;
 const VK_MENU    = 0x12; // Alt
 const VK_TAB     = 0x09;
 const KEYUP      = 0x0002;
@@ -95,6 +96,14 @@ const YDOTOOL_KEY_LEFTCTRL = '29';
 const YDOTOOL_KEY_C = '46';
 const MACRO_ERROR_THROTTLE_MS = 3000;
 const MACRO_SEND_FAILED_TITLE = 'WORK Faster WORK: macro send failed';
+
+// ── Windows agent detection cache ───────────────────────────────────────────
+const WINDOWS_AGENT_CACHE_TTL_MS = 5000;
+let windowsAgentCache = { type: AGENT.GENERIC, at: 0 };
+
+// ── Windows clipboard restore state (shared across rapid cracks) ─────────────
+let clipboardRestoreTimer = null;
+let clipboardOriginal = null;
 
 /** One Alt+Tab / Cmd+Tab so focus returns to the previously active app after tray click. */
 function refocusPreviousApp() {
@@ -233,6 +242,7 @@ function createOverlay() {
 }
 
 function showOverlayAndSpawn() {
+  prefetchWindowsAgent();
   if (!overlay) createOverlay();
   if (!overlay) return;
   overlay.show();
@@ -768,30 +778,135 @@ function sendMacro() {
   }
 }
 
-function sendMacroWindows(text) {
-  if (!keybd_event || !VkKeyScanA) return;
-  const tapKey = vk => {
-    keybd_event(vk, 0, 0, 0);
-    keybd_event(vk, 0, KEYUP, 0);
-  };
-  const tapChar = ch => {
-    const packed = VkKeyScanA(ch.charCodeAt(0));
-    if (packed === -1) return;
-    const vk = packed & 0xff;
-    const shiftState = (packed >> 8) & 0xff;
-    if (shiftState & 1) keybd_event(0x10, 0, 0, 0); // Shift down
-    tapKey(vk);
-    if (shiftState & 1) keybd_event(0x10, 0, KEYUP, 0); // Shift up
-  };
+// ── Windows agent detection ─────────────────────────────────────────────────
+/**
+ * Detect the active agent on Windows by scanning running process command lines
+ * via PowerShell/WMI. Result is cached for WINDOWS_AGENT_CACHE_TTL_MS.
+ */
+function detectAgentWindows(cb) {
+  const now = Date.now();
+  if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS) {
+    return cb(windowsAgentCache.type);
+  }
+  execFile('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    'Get-WmiObject Win32_Process | Where-Object {$_.CommandLine} | Select-Object -ExpandProperty CommandLine',
+  ], { timeout: 4000 }, (err, stdout) => {
+    if (err) {
+      console.warn('Windows agent detection failed:', err.message);
+      return cb(AGENT.GENERIC);
+    }
+    const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let found = AGENT.GENERIC;
+    outer: for (const pat of CLI_AGENT_PATTERNS) {
+      for (const line of lines) {
+        if (pat.regex.test(line)) { found = pat.type; break outer; }
+      }
+    }
+    windowsAgentCache = { type: found, at: Date.now() };
+    cb(found);
+  });
+}
 
-  // Ctrl+C (interrupt)
+/** Pre-warm the Windows agent cache when the overlay is spawned. */
+function prefetchWindowsAgent() {
+  if (process.platform !== 'win32') return;
+  const now = Date.now();
+  if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS) return;
+  detectAgentWindows(() => {}); // fire-and-forget to populate cache
+}
+
+// ── Windows macro primitives ─────────────────────────────────────────────────
+/**
+ * Paste `text` via the clipboard (Ctrl+V) and then press Enter.
+ * Uses the clipboard for two reasons:
+ *   1. Unicode / CJK characters work correctly (VkKeyScanA is ASCII-only).
+ *   2. Paste is atomic, so no characters are dropped on consecutive cracks.
+ * The original clipboard content is saved before the first crack in a sequence
+ * and restored 400 ms after the last crack.
+ */
+function windowsPasteAndEnter(text) {
+  if (!keybd_event) return;
+
+  // Preserve the user's clipboard for the first crack in a burst.
+  if (clipboardRestoreTimer === null && clipboardOriginal === null) {
+    clipboardOriginal = clipboard.readText();
+  }
+  // Reset the debounced restore timer so each rapid crack extends the window.
+  if (clipboardRestoreTimer !== null) {
+    clearTimeout(clipboardRestoreTimer);
+    clipboardRestoreTimer = null;
+  }
+
+  clipboard.writeText(text);
+
+  // Ctrl+V – paste the text atomically.
+  keybd_event(VK_CONTROL, 0, 0, 0);
+  keybd_event(VK_V, 0, 0, 0);
+  keybd_event(VK_V, 0, KEYUP, 0);
+  keybd_event(VK_CONTROL, 0, KEYUP, 0);
+
+  // Give the terminal a moment to receive the paste before pressing Enter.
+  setTimeout(() => {
+    keybd_event(VK_RETURN, 0, 0, 0);
+    keybd_event(VK_RETURN, 0, KEYUP, 0);
+
+    // Restore clipboard 400 ms after the last crack in the burst.
+    clipboardRestoreTimer = setTimeout(() => {
+      if (clipboardOriginal !== null) {
+        clipboard.writeText(clipboardOriginal);
+        clipboardOriginal = null;
+      }
+      clipboardRestoreTimer = null;
+    }, 400);
+  }, 60);
+}
+
+/**
+ * Send ESC to safely interrupt the current CLI task (without triggering exit),
+ * wait briefly, then paste text + Enter.
+ * Appropriate for: Claude Code, Gemini CLI, Copilot CLI, Qwen CLI, and generic.
+ */
+function windowsEscThenType(text) {
+  if (!keybd_event) return;
+  keybd_event(VK_ESCAPE, 0, 0, 0);
+  keybd_event(VK_ESCAPE, 0, KEYUP, 0);
+  setTimeout(() => windowsPasteAndEnter(text), 100);
+}
+
+/**
+ * Send Ctrl+C (SIGINT equivalent) then paste text + Enter.
+ * Appropriate for: Aider (which shows a Y/N exit prompt and won't exit on a
+ * single Ctrl+C).
+ */
+function windowsCtrlCThenType(text) {
+  if (!keybd_event) return;
   keybd_event(VK_CONTROL, 0, 0, 0);
   keybd_event(VK_C, 0, 0, 0);
   keybd_event(VK_C, 0, KEYUP, 0);
   keybd_event(VK_CONTROL, 0, KEYUP, 0);
-  for (const ch of text) tapChar(ch);
-  keybd_event(VK_RETURN, 0, 0, 0);
-  keybd_event(VK_RETURN, 0, KEYUP, 0);
+  setTimeout(() => windowsPasteAndEnter(text), 100);
+}
+
+function sendMacroWindows(text) {
+  if (!keybd_event) return;
+  detectAgentWindows(agentType => {
+    switch (agentType) {
+      case AGENT.CODEX_CLI:
+        // Codex CLI accepts follow-up messages directly; any interrupt exits it.
+        windowsPasteAndEnter(text);
+        break;
+      case AGENT.AIDER_CLI:
+        // Aider shows a Y/N confirmation on Ctrl+C and won't exit immediately.
+        windowsCtrlCThenType(text);
+        break;
+      default:
+        // Claude Code, Gemini CLI, Copilot CLI, Qwen CLI, generic:
+        // ESC aborts the current streaming response without exiting the CLI.
+        windowsEscThenType(text);
+        break;
+    }
+  });
 }
 
 function sendMacroMac(text) {
