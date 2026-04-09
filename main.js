@@ -90,6 +90,9 @@ const VK_C       = 0x43;
 const VK_MENU    = 0x12; // Alt
 const VK_TAB     = 0x09;
 const KEYUP      = 0x0002;
+const YDOTOOL_KEY_ENTER = '28';
+const YDOTOOL_KEY_LEFTCTRL = '29';
+const YDOTOOL_KEY_C = '46';
 const MACRO_ERROR_THROTTLE_MS = 3000;
 const MACRO_SEND_FAILED_TITLE = 'WORK Faster WORK: macro send failed';
 
@@ -667,8 +670,7 @@ function notifyUser(title, body) {
     dialog.showMessageBox({
       type: 'warning',
       title,
-      message: title,
-      detail: body,
+      message: body,
       buttons: ['OK'],
       noLink: true,
     }).catch(() => {});
@@ -713,7 +715,7 @@ function xdotoolTypeAndReturn(text, cb) {
     execLinuxMacro('ydotool', ['type', '--key-delay', '20', text], 'type', err => {
       if (err) return cb && cb(err);
       // Linux input-event keycode 28 = KEY_ENTER.
-      execLinuxMacro('ydotool', ['key', '28:1', '28:0'], 'Return', keyErr => {
+      execLinuxMacro('ydotool', ['key', `${YDOTOOL_KEY_ENTER}:1`, `${YDOTOOL_KEY_ENTER}:0`], 'Return', keyErr => {
         cb && cb(keyErr || null);
       });
     });
@@ -732,7 +734,7 @@ function linuxInterruptAndType(text) {
   const toolName = getLinuxMacroBackend();
   // Linux input-event keycodes: 29 = KEY_LEFTCTRL, 46 = KEY_C.
   const ctrlCArgs = toolName === 'ydotool'
-    ? ['key', '29:1', '46:1', '46:0', '29:0']
+    ? ['key', `${YDOTOOL_KEY_LEFTCTRL}:1`, `${YDOTOOL_KEY_C}:1`, `${YDOTOOL_KEY_C}:0`, `${YDOTOOL_KEY_LEFTCTRL}:0`]
     : ['key', 'ctrl+c'];
   execLinuxMacro(toolName, ctrlCArgs, 'ctrl+c', err => {
     if (err) {
