@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, dialog, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -112,9 +112,8 @@ function refocusPreviousApp() {
         if (err) console.warn('refocus previous app (Cmd+Tab) failed:', err.message);
       });
     } else if (process.platform === 'linux') {
-      execFile('xdotool', ['key', 'alt+Tab'], err => {
-        if (err) console.warn('refocus previous app (alt+Tab) failed – is xdotool installed?:', err.message);
-      });
+      // No-op on Linux: Alt+Tab automation is fragile across desktop
+      // environments/window managers and frequently blocked on Wayland.
     }
   };
   setTimeout(run, delayMs);
@@ -179,8 +178,23 @@ async function getTrayIcon() {
 }
 
 // ── Overlay window ──────────────────────────────────────────────────────────
+function getVirtualDisplayBounds() {
+  const displays = screen.getAllDisplays();
+  if (!displays || displays.length === 0) return screen.getPrimaryDisplay().bounds;
+  const left = Math.min(...displays.map(d => d.bounds.x));
+  const top = Math.min(...displays.map(d => d.bounds.y));
+  const right = Math.max(...displays.map(d => d.bounds.x + d.bounds.width));
+  const bottom = Math.max(...displays.map(d => d.bounds.y + d.bounds.height));
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
 function createOverlay() {
-  const { bounds } = screen.getPrimaryDisplay();
+  const bounds = getVirtualDisplayBounds();
   overlay = new BrowserWindow({
     x: bounds.x, y: bounds.y,
     width: bounds.width, height: bounds.height,
@@ -213,12 +227,9 @@ function createOverlay() {
   });
 }
 
-function toggleOverlay() {
-  if (overlay && overlay.isVisible()) {
-    overlay.webContents.send('drop-whip');
-    return;
-  }
+function showOverlayAndSpawn() {
   if (!overlay) createOverlay();
+  if (!overlay) return;
   overlay.show();
   if (overlayReady) {
     overlay.webContents.send('spawn-whip');
@@ -226,6 +237,14 @@ function toggleOverlay() {
   } else {
     spawnQueued = true;
   }
+}
+
+function toggleOverlay() {
+  if (overlay && overlay.isVisible()) {
+    overlay.webContents.send('drop-whip');
+    return;
+  }
+  showOverlayAndSpawn();
 }
 
 // ── IPC ─────────────────────────────────────────────────────────────────────
@@ -364,6 +383,21 @@ function updateTrayMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Whip cracks: ${whipCount}`, enabled: false },
+      { type: 'separator' },
+      {
+        label: 'Spawn Whip',
+        click: () => showOverlayAndSpawn(),
+      },
+      {
+        label: 'Test Overlay',
+        click: () => showOverlayAndSpawn(),
+      },
+      {
+        label: 'Crack Now',
+        click: () => {
+          try { sendMacro(); } catch (err) { console.warn('sendMacro failed:', err?.message || err); }
+        },
+      },
       { type: 'separator' },
       {
         label: 'Open Config Folder',
@@ -531,11 +565,31 @@ function detectAgentMac(cb) {
  * Returns AGENT.* string via callback.
  */
 function detectAgentLinux(cb) {
-  execFile('ps', ['aux'], (err, stdout) => {
+  execFile('ps', ['-eo', 'tty=,pid=,command='], (err, stdout) => {
     if (err) return cb(AGENT.GENERIC);
     const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
+    const candidates = [];
     for (const pat of CLI_AGENT_PATTERNS) {
-      if (lines.some(line => pat.regex.test(line))) return cb(pat.type);
+      for (const line of lines) {
+        const m = line.match(/^(\S+)\s+(\d+)\s+(.*)$/);
+        if (!m) continue;
+        const tty = m[1];
+        const pid = Number(m[2]);
+        const command = m[3];
+        if (!pat.regex.test(command)) continue;
+        candidates.push({
+          type: pat.type,
+          ttyInteractive: tty !== '?',
+          pid: Number.isFinite(pid) ? pid : 0,
+        });
+      }
+    }
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => {
+        if (a.ttyInteractive !== b.ttyInteractive) return a.ttyInteractive ? -1 : 1;
+        return b.pid - a.pid;
+      });
+      return cb(candidates[0].type);
     }
     cb(AGENT.GENERIC);
   });
@@ -582,22 +636,86 @@ function macTypeAndCmdEnter(text) {
   });
 }
 
-// ── Linux macro primitives (xdotool) ────────────────────────────────────────
+// ── Linux macro primitives (xdotool / ydotool) ─────────────────────────────
+function notifyUser(title, body) {
+  try {
+    if (Notification && Notification.isSupported()) {
+      new Notification({ title, body, silent: true }).show();
+      return;
+    }
+    dialog.showMessageBox({
+      type: 'warning',
+      title,
+      message: title,
+      detail: body,
+      buttons: ['OK'],
+      noLink: true,
+    }).catch(() => {});
+  } catch (e) {
+    console.warn('notifyUser failed:', e?.message || e);
+  }
+}
+
+function isWaylandSession() {
+  return process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY;
+}
+
+function getLinuxMacroBackend() {
+  return isWaylandSession() ? 'ydotool' : 'xdotool';
+}
+
+let lastLinuxMacroErrorAt = 0;
+function notifyLinuxMacroFailure(toolName, err) {
+  const now = Date.now();
+  if (now - lastLinuxMacroErrorAt < 3000) return;
+  lastLinuxMacroErrorAt = now;
+  const setupHint = toolName === 'ydotool'
+    ? 'Wayland detected. Install ydotool and ensure ydotoold is running.'
+    : 'Install xdotool (X11), or run under Wayland with ydotool + ydotoold.';
+  notifyUser(
+    'WORK Faster WORK: macro send failed',
+    `${toolName} command failed: ${err?.message || err}\n${setupHint}`
+  );
+}
+
+function execLinuxMacro(toolName, args, label, cb) {
+  execFile(toolName, args, err => {
+    if (err) {
+      console.warn(`${toolName} ${label} failed:`, err.message);
+      notifyLinuxMacroFailure(toolName, err);
+      return cb && cb(err);
+    }
+    cb && cb(null);
+  });
+}
+
 function xdotoolTypeAndReturn(text, cb) {
-  execFile('xdotool', ['type', '--clearmodifiers', '--delay', '20', text], err => {
-    if (err) { console.warn('xdotool type failed:', err.message); return cb && cb(err); }
-    execFile('xdotool', ['key', 'Return'], err => {
-      if (err) console.warn('xdotool Return failed:', err.message);
-      cb && cb(err || null);
+  const toolName = getLinuxMacroBackend();
+  if (toolName === 'ydotool') {
+    execLinuxMacro('ydotool', ['type', '--key-delay', '20', text], 'type', err => {
+      if (err) return cb && cb(err);
+      execLinuxMacro('ydotool', ['key', '28:1', '28:0'], 'Return', keyErr => {
+        cb && cb(keyErr || null);
+      });
+    });
+    return;
+  }
+
+  execLinuxMacro('xdotool', ['type', '--clearmodifiers', '--delay', '20', text], 'type', err => {
+    if (err) return cb && cb(err);
+    execLinuxMacro('xdotool', ['key', 'Return'], 'Return', keyErr => {
+      cb && cb(keyErr || null);
     });
   });
 }
 
 function linuxInterruptAndType(text) {
-  // Requires xdotool: sudo apt install xdotool  (X11; Wayland users need ydotool)
-  execFile('xdotool', ['key', 'ctrl+c'], err => {
+  const toolName = getLinuxMacroBackend();
+  const ctrlCArgs = toolName === 'ydotool'
+    ? ['key', '29:1', '46:1', '46:0', '29:0']
+    : ['key', 'ctrl+c'];
+  execLinuxMacro(toolName, ctrlCArgs, 'ctrl+c', err => {
     if (err) {
-      console.warn('xdotool ctrl+c failed – is xdotool installed?:', err.message);
       return;
     }
     xdotoolTypeAndReturn(text);
@@ -692,6 +810,7 @@ app.whenReady().then(async () => {
   tray.setToolTip('WORK Faster WORK – click for whip');
   updateTrayMenu();
   tray.on('click', toggleOverlay);
+  tray.on('double-click', toggleOverlay);
 });
 
 app.on('window-all-closed', e => e.preventDefault()); // keep alive in tray

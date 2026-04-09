@@ -47,6 +47,7 @@ npm uninstall -g SnifferCaptain/WORK_Faster_WORK
 ## 操作方式
 
 - **点击托盘图标** → 召唤鞭子
+- **右键托盘图标** → 备用入口：**Spawn Whip / Test Overlay / Crack Now**
 - **点击屏幕** → 放下鞭子
 - **挥动鞭子** 😩💢 → 向 AI 助手发送中断信号 + 一条随机激励语句
 
@@ -82,7 +83,11 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 
 > **macOS：** 终端进程检测优先通过 TTY（`ps -t <tty>`，适用于 Apple Terminal），其他终端模拟器（iTerm2、WezTerm、Ghostty、Warp、Hyper）则通过窗口标题兜底。
 
-> **Linux：** 通过 `ps aux` 扫描所有运行进程，匹配到第一个 Agent 进程名即停止。
+> **Linux：** 会扫描进程列表，并优先选择带交互式 TTY 的匹配项，其次选择较新的 PID，以降低多 Agent 并存时的误判概率。
+
+> **Linux 宏后端：** X11 会使用 `xdotool`；Wayland 会使用 `ydotool`。宏发送失败时，应用会弹出用户可见告警并给出修复提示。
+
+> **Overlay 覆盖范围：** overlay 会覆盖所有显示器组成的虚拟桌面，而不只主屏幕。
 
 > **Windows：** 暂未实现进程检测，所有 Agent 均使用兜底宏（Ctrl+C + 文本 + Enter）。
 

@@ -47,6 +47,7 @@ npm uninstall -g SnifferCaptain/WORK_Faster_WORK
 ## Controls
 
 - **Click tray icon** → spawn whip
+- **Right-click tray icon** → fallback actions: **Spawn Whip / Test Overlay / Crack Now**
 - **Click on screen** → drop whip
 - **Crack the whip** 😩💢 → sends an interrupt + one of several encouraging messages to your agent
 
@@ -82,7 +83,11 @@ WORK_Faster_WORK auto-detects which agent is running and sends the correct keybo
 
 > **macOS:** terminal process detection uses the TTY (`ps -t <tty>`) for Apple Terminal, falling back to window title for all other terminal emulators (iTerm2, WezTerm, Ghostty, Warp, Hyper).
 
-> **Linux:** detection scans `ps aux` for the first matching agent process name.
+> **Linux:** detection scans process list and prioritizes interactive TTY matches, then newer PIDs, to reduce false picks when multiple agents run at once.
+
+> **Linux macro backend:** X11 sessions use `xdotool`; Wayland sessions use `ydotool`. If macro execution fails, the app shows a user-visible warning with setup hints.
+
+> **Overlay display area:** the overlay spans the full virtual desktop across all monitors (not only the primary display).
 
 > **Windows:** detection is not yet implemented; fallback macro (Ctrl+C + text + Enter) is used for all agents.
 
@@ -145,4 +150,3 @@ The bundled default config is at [`config.default.jsonc`](config.default.jsonc).
 - [x] Milestone visual effects at every 2^n cracks (escalating from sparkles → confetti → fireworks → rainbow → full chaos)
 - [ ] Updated whip physics
 - [ ] Windows agent detection
-
