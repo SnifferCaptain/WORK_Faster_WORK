@@ -13,7 +13,7 @@ WORK_Faster_WORK is a cross-platform desktop tray app that detects which AI codi
 Since this fork is not yet published to npm, install directly from GitHub:
 
 ```bash
-npm install -g SnifferCaptain/WORK_Faster_WORK#copilot/make-it-cross-platform && work-faster-work
+npm install -g SnifferCaptain/WORK_Faster_WORK#copilot/fix-linux-tray-click-issues && work-faster-work
 ```
 
 > **Note:** Once this branch is merged to the default branch, the command simplifies to:
@@ -46,8 +46,12 @@ npm uninstall -g SnifferCaptain/WORK_Faster_WORK
 
 ## Controls
 
-- **Click tray icon** → spawn whip
-- **Right-click tray icon** → fallback actions: **Spawn Whip / Test Overlay / Crack Now**
+- **Left-click tray icon** → spawn whip
+- **Double-click tray icon** → spawn whip (same as left-click; useful on some Linux environments that ignore single left-click)
+- **Right-click tray icon** → context menu with fallback actions:
+  - **Spawn Whip** — show overlay and immediately spawn the whip
+  - **Test Overlay** — show the overlay window without spawning the whip (useful to confirm the overlay works before cracking)
+  - **Crack Now** — send the keyboard macro to your agent directly, without going through the overlay
 - **Click on screen** → drop whip
 - **Crack the whip** 😩💢 → sends an interrupt + one of several encouraging messages to your agent
 

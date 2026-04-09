@@ -13,7 +13,7 @@ WORK_Faster_WORK 是一款跨平台桌面托盘应用，能够自动检测你当
 本项目是 fork，尚未发布到 npm，请直接从 GitHub 安装：
 
 ```bash
-npm install -g SnifferCaptain/WORK_Faster_WORK#copilot/make-it-cross-platform && work-faster-work
+npm install -g SnifferCaptain/WORK_Faster_WORK#copilot/fix-linux-tray-click-issues && work-faster-work
 ```
 
 > **提示：** 待该分支合并至默认分支后，命令可简化为：
@@ -46,8 +46,12 @@ npm uninstall -g SnifferCaptain/WORK_Faster_WORK
 
 ## 操作方式
 
-- **点击托盘图标** → 召唤鞭子
-- **右键托盘图标** → 备用入口：**Spawn Whip / Test Overlay / Crack Now**
+- **左键点击托盘图标** → 召唤鞭子
+- **双击托盘图标** → 召唤鞭子（与左键相同；部分 Linux 环境下左键单击可能无响应，双击可作为备用）
+- **右键托盘图标** → 弹出菜单，包含以下备用入口：
+  - **Spawn Whip** — 显示 overlay 并立即召唤鞭子
+  - **Test Overlay** — 仅显示 overlay 窗口，不召唤鞭子（可用来确认 overlay 是否正常显示）
+  - **Crack Now** — 直接向 Agent 发送键盘宏，无需经过 overlay
 - **点击屏幕** → 放下鞭子
 - **挥动鞭子** 😩💢 → 向 AI 助手发送中断信号 + 一条随机激励语句
 

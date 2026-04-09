@@ -286,6 +286,7 @@ ipcMain.on('whip-crack', event => {
     sendMacro();
   } catch (err) {
     console.warn('sendMacro failed:', err?.message || err);
+    notifyMacroSendFailed(err);
   }
 
   // Track lifetime crack count and fire milestone effects at powers of two
