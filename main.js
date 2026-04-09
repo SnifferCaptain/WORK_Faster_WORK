@@ -277,7 +277,7 @@ function guardOverlayEvent(event, channel) {
 }
 
 function notifyMacroSendFailed(err, detailPrefix = 'Failed to send macro:') {
-  notifyUser(MACRO_SEND_FAILED_TITLE, `${detailPrefix} ${err?.message || err}`);
+  notifyUser(MACRO_SEND_FAILED_TITLE, `${detailPrefix} ${err?.message || String(err)}`);
 }
 
 ipcMain.on('whip-crack', event => {
