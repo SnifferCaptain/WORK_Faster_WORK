@@ -239,6 +239,12 @@ function showOverlayAndSpawn() {
   }
 }
 
+function showOverlayOnly() {
+  if (!overlay) createOverlay();
+  if (!overlay) return;
+  overlay.show();
+}
+
 function toggleOverlay() {
   if (overlay && overlay.isVisible()) {
     overlay.webContents.send('drop-whip');
@@ -390,7 +396,7 @@ function updateTrayMenu() {
       },
       {
         label: 'Test Overlay',
-        click: () => showOverlayAndSpawn(),
+        click: () => showOverlayOnly(),
       },
       {
         label: 'Crack Now',
@@ -565,7 +571,7 @@ function detectAgentMac(cb) {
  * Returns AGENT.* string via callback.
  */
 function detectAgentLinux(cb) {
-  execFile('ps', ['-eo', 'tty=,pid=,command='], (err, stdout) => {
+  execFile('ps', ['-eo', 'tty,pid,args', '--no-headers'], (err, stdout) => {
     if (err) return cb(AGENT.GENERIC);
     const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
     const candidates = [];
