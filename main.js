@@ -401,7 +401,15 @@ function updateTrayMenu() {
       {
         label: 'Crack Now',
         click: () => {
-          try { sendMacro(); } catch (err) { console.warn('sendMacro failed:', err?.message || err); }
+          try {
+            sendMacro();
+          } catch (err) {
+            console.warn('sendMacro failed:', err?.message || err);
+            notifyUser(
+              'WORK Faster WORK: macro send failed',
+              `Failed to send macro: ${err?.message || err}`
+            );
+          }
         },
       },
       { type: 'separator' },
@@ -586,7 +594,7 @@ function detectAgentLinux(cb) {
         candidates.push({
           type: pat.type,
           ttyInteractive: tty !== '?',
-          pid: Number.isFinite(pid) ? pid : 0,
+          pid,
         });
       }
     }
@@ -645,7 +653,7 @@ function macTypeAndCmdEnter(text) {
 // ── Linux macro primitives (xdotool / ydotool) ─────────────────────────────
 function notifyUser(title, body) {
   try {
-    if (Notification && Notification.isSupported()) {
+    if (Notification.isSupported()) {
       new Notification({ title, body, silent: true }).show();
       return;
     }
