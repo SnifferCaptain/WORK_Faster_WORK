@@ -99,7 +99,7 @@ const MACRO_SEND_FAILED_TITLE = 'WORK Faster WORK: macro send failed';
 
 // ── Windows agent detection cache ───────────────────────────────────────────
 const WINDOWS_AGENT_CACHE_TTL_MS = 5000;
-const WINDOWS_AGENT_DETECTION_TIMEOUT_MS = 4000;
+const WINDOWS_AGENT_DETECTION_TIMEOUT_MS = 3000;
 let windowsAgentCache = { type: AGENT.GENERIC, at: 0 };
 
 // ── Windows clipboard restore state (shared across rapid cracks) ─────────────
@@ -797,7 +797,9 @@ function detectAgentWindows(cb) {
   }
   execFile('powershell', [
     '-NoProfile', '-NonInteractive', '-Command',
-    'Get-WmiObject Win32_Process | Where-Object {$_.CommandLine} | Select-Object -ExpandProperty CommandLine',
+    // Get-CimInstance is the modern replacement for Get-WmiObject (PowerShell 3+/Windows 10+).
+    // It is faster and does not require WinRM for local queries.
+    '(Get-CimInstance Win32_Process).CommandLine',
   ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
     if (err) {
       console.warn('Windows agent detection failed:', err.message);
@@ -837,7 +839,12 @@ function windowsPasteAndEnter(text) {
 
   // Preserve the user's clipboard for the first crack in a burst.
   if (clipboardRestoreTimer === null && clipboardOriginal === null) {
-    clipboardOriginal = clipboard.readText();
+    try {
+      clipboardOriginal = clipboard.readText();
+    } catch (e) {
+      console.warn('clipboard.readText failed:', e?.message || e);
+      clipboardOriginal = ''; // treat as empty so we still restore to a known state
+    }
   }
   // Reset the debounced restore timer so each rapid crack extends the window.
   if (clipboardRestoreTimer !== null) {
@@ -845,7 +852,17 @@ function windowsPasteAndEnter(text) {
     clipboardRestoreTimer = null;
   }
 
-  clipboard.writeText(text);
+  try {
+    clipboard.writeText(text);
+  } catch (e) {
+    console.warn('clipboard.writeText failed – falling back to no text:', e?.message || e);
+    // If we can't write to clipboard, at least press Enter so the crack is
+    // still somewhat visible to the user, even if the text is missing.
+    keybd_event(VK_RETURN, 0, 0, 0);
+    keybd_event(VK_RETURN, 0, KEYUP, 0);
+    clipboardOriginal = null;
+    return;
+  }
 
   // Ctrl+V – paste the text atomically.
   keybd_event(VK_CONTROL, 0, 0, 0);
@@ -861,7 +878,11 @@ function windowsPasteAndEnter(text) {
     // Restore clipboard after the last crack in the burst.
     clipboardRestoreTimer = setTimeout(() => {
       if (clipboardOriginal !== null) {
-        clipboard.writeText(clipboardOriginal);
+        try {
+          clipboard.writeText(clipboardOriginal);
+        } catch (e) {
+          console.warn('clipboard restore failed:', e?.message || e);
+        }
         clipboardOriginal = null;
       }
       clipboardRestoreTimer = null;
