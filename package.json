@@ -1,14 +1,16 @@
 {
-  "name": "badclaude",
-  "version": "1.0.2",
-  "description": "Whip Claude into shape",
+  "name": "work-faster-work",
+  "version": "1.1.0",
+  "description": "Whip your AI coding agent into shape – cross-platform, multi-agent",
   "license": "MIT",
   "main": "main.js",
   "bin": {
-    "badclaude": "bin/badclaude.js"
+    "work-faster-work": "bin/work-faster-work.js",
+    "work-faster-work-uninstall": "bin/uninstall.js"
   },
   "os": [
     "darwin",
+    "linux",
     "win32"
   ],
   "engines": {
@@ -18,29 +20,43 @@
     "electron",
     "tray",
     "overlay",
-    "cli"
+    "cli",
+    "claude",
+    "codex",
+    "copilot",
+    "aider",
+    "gemini",
+    "cursor",
+    "windsurf",
+    "trae",
+    "qwen",
+    "aicoding"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GitFrog1111/badclaude.git"
+    "url": "git+https://github.com/SnifferCaptain/WORK_Faster_WORK.git"
   },
   "bugs": {
-    "url": "https://github.com/GitFrog1111/badclaude/issues"
+    "url": "https://github.com/SnifferCaptain/WORK_Faster_WORK/issues"
   },
-  "homepage": "https://github.com/GitFrog1111/badclaude#readme",
+  "homepage": "https://github.com/SnifferCaptain/WORK_Faster_WORK#readme",
   "files": [
     "main.js",
     "preload.js",
     "overlay.html",
     "sounds",
     "icon",
-    "bin/badclaude.js",
-    "README.md"
+    "bin/work-faster-work.js",
+    "bin/uninstall.js",
+    "config.default.jsonc",
+    "README.md",
+    "README.zh-CN.md"
   ],
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "pack": "npm pack"
+    "pack": "npm pack",
+    "uninstall": "work-faster-work-uninstall"
   },
   "dependencies": {
     "electron": "^33.0.0",

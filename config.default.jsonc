@@ -1,0 +1,29 @@
+// WORK_Faster_WORK – default configuration
+// ─────────────────────────────────────────────────────────────────────────────
+// To customize, copy this file to your config directory and edit it there.
+// Config directory locations:
+//   macOS  : ~/Library/Application Support/work-faster-work/config.jsonc
+//   Linux  : ~/.config/work-faster-work/config.jsonc
+//   Windows: %APPDATA%\work-faster-work\config.jsonc
+//
+// You can also click "Open Config Folder" in the tray menu to open the folder
+// and copy this template automatically.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  // Phrases sent to your AI agent when you crack the whip.
+  // One is chosen at random each time. You can add, remove, or change any of them.
+  "phrases": [
+    "FASTER",
+    "FASTER",
+    "FASTER",
+    "GO FASTER",
+    "Faster CLANKER",
+    "Work FASTER",
+    "Speed it up clanker",
+    "Come on, don't slack!",
+    "Less waiting, more coding!",
+    "Move it!",
+    "Pick up the pace!",
+    "I'm paying for tokens here!"
+  ]
+}
