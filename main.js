@@ -99,9 +99,16 @@ const MACRO_SEND_FAILED_TITLE = 'WORK Faster WORK: macro send failed';
 
 // ── Windows agent detection cache ───────────────────────────────────────────
 const WINDOWS_AGENT_CACHE_TTL_MS = 5000;
+const WINDOWS_AGENT_DETECTION_TIMEOUT_MS = 4000;
 let windowsAgentCache = { type: AGENT.GENERIC, at: 0 };
 
 // ── Windows clipboard restore state (shared across rapid cracks) ─────────────
+// PASTE_TO_ENTER_DELAY_MS: give the terminal time to receive the paste before Enter.
+// CLIPBOARD_RESTORE_DEBOUNCE_MS: debounce window; clipboard is restored this long
+// after the last whip crack in a burst.
+const PASTE_TO_ENTER_DELAY_MS = 60;
+const INTERRUPT_TO_PASTE_DELAY_MS = 100;
+const CLIPBOARD_RESTORE_DEBOUNCE_MS = 400;
 let clipboardRestoreTimer = null;
 let clipboardOriginal = null;
 
@@ -791,7 +798,7 @@ function detectAgentWindows(cb) {
   execFile('powershell', [
     '-NoProfile', '-NonInteractive', '-Command',
     'Get-WmiObject Win32_Process | Where-Object {$_.CommandLine} | Select-Object -ExpandProperty CommandLine',
-  ], { timeout: 4000 }, (err, stdout) => {
+  ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
     if (err) {
       console.warn('Windows agent detection failed:', err.message);
       return cb(AGENT.GENERIC);
@@ -851,15 +858,15 @@ function windowsPasteAndEnter(text) {
     keybd_event(VK_RETURN, 0, 0, 0);
     keybd_event(VK_RETURN, 0, KEYUP, 0);
 
-    // Restore clipboard 400 ms after the last crack in the burst.
+    // Restore clipboard after the last crack in the burst.
     clipboardRestoreTimer = setTimeout(() => {
       if (clipboardOriginal !== null) {
         clipboard.writeText(clipboardOriginal);
         clipboardOriginal = null;
       }
       clipboardRestoreTimer = null;
-    }, 400);
-  }, 60);
+    }, CLIPBOARD_RESTORE_DEBOUNCE_MS);
+  }, PASTE_TO_ENTER_DELAY_MS);
 }
 
 /**
@@ -871,7 +878,7 @@ function windowsEscThenType(text) {
   if (!keybd_event) return;
   keybd_event(VK_ESCAPE, 0, 0, 0);
   keybd_event(VK_ESCAPE, 0, KEYUP, 0);
-  setTimeout(() => windowsPasteAndEnter(text), 100);
+  setTimeout(() => windowsPasteAndEnter(text), INTERRUPT_TO_PASTE_DELAY_MS);
 }
 
 /**
@@ -885,7 +892,7 @@ function windowsCtrlCThenType(text) {
   keybd_event(VK_C, 0, 0, 0);
   keybd_event(VK_C, 0, KEYUP, 0);
   keybd_event(VK_CONTROL, 0, KEYUP, 0);
-  setTimeout(() => windowsPasteAndEnter(text), 100);
+  setTimeout(() => windowsPasteAndEnter(text), INTERRUPT_TO_PASTE_DELAY_MS);
 }
 
 function sendMacroWindows(text) {
