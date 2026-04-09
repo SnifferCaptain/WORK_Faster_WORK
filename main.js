@@ -90,6 +90,8 @@ const VK_C       = 0x43;
 const VK_MENU    = 0x12; // Alt
 const VK_TAB     = 0x09;
 const KEYUP      = 0x0002;
+const MACRO_ERROR_THROTTLE_MS = 3000;
+const MACRO_SEND_FAILED_TITLE = 'WORK Faster WORK: macro send failed';
 
 /** One Alt+Tab / Cmd+Tab so focus returns to the previously active app after tray click. */
 function refocusPreviousApp() {
@@ -271,6 +273,10 @@ function guardOverlayEvent(event, channel) {
   return false;
 }
 
+function notifyMacroSendFailed(err, detailPrefix = 'Failed to send macro:') {
+  notifyUser(MACRO_SEND_FAILED_TITLE, `${detailPrefix} ${err?.message || err}`);
+}
+
 ipcMain.on('whip-crack', event => {
   if (!guardOverlayEvent(event, 'whip-crack')) return;
   try {
@@ -405,10 +411,7 @@ function updateTrayMenu() {
             sendMacro();
           } catch (err) {
             console.warn('sendMacro failed:', err?.message || err);
-            notifyUser(
-              'WORK Faster WORK: macro send failed',
-              `Failed to send macro: ${err?.message || err}`
-            );
+            notifyMacroSendFailed(err);
           }
         },
       },
@@ -599,6 +602,8 @@ function detectAgentLinux(cb) {
       }
     }
     if (candidates.length > 0) {
+      // Prioritize likely active interactive sessions first (TTY != '?'),
+      // then prefer newer processes (larger PID) within that bucket.
       candidates.sort((a, b) => {
         if (a.ttyInteractive !== b.ttyInteractive) return a.ttyInteractive ? -1 : 1;
         return b.pid - a.pid;
@@ -681,15 +686,12 @@ function getLinuxMacroBackend() {
 let lastLinuxMacroErrorAt = 0;
 function notifyLinuxMacroFailure(toolName, err) {
   const now = Date.now();
-  if (now - lastLinuxMacroErrorAt < 3000) return;
+  if (now - lastLinuxMacroErrorAt < MACRO_ERROR_THROTTLE_MS) return;
   lastLinuxMacroErrorAt = now;
   const setupHint = toolName === 'ydotool'
     ? 'Wayland detected. Install ydotool and ensure ydotoold is running.'
     : 'Install xdotool (X11), or run under Wayland with ydotool + ydotoold.';
-  notifyUser(
-    'WORK Faster WORK: macro send failed',
-    `${toolName} command failed: ${err?.message || err}\n${setupHint}`
-  );
+  notifyMacroSendFailed(err, `${toolName} command failed:\n${setupHint}\nRoot error:`);
 }
 
 function execLinuxMacro(toolName, args, label, cb) {
