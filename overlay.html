@@ -77,7 +77,7 @@ const BEND_COS_THRESHOLDS = (() => {
   for (let i = 1; i < P.segments - 1; i++) {
     const t = i / (P.segments - 2);
     const maxBendRad = lerp(P.handleMaxBendDeg, P.tipMaxBendDeg, t) * Math.PI / 180;
-    thresholds.push(Math.cos(Math.PI - maxBendRad));
+    thresholds.push(-Math.cos(maxBendRad));
   }
   return thresholds;
 })();

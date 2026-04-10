@@ -825,26 +825,31 @@ function detectAgentWindows(cb) {
   // Refresh in background if the cache is stale and no refresh is in progress.
   if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS || windowsAgentRefreshing) return;
   windowsAgentRefreshing = true;
-  execFile('powershell', [
-    '-NoProfile', '-NonInteractive', '-Command',
-    // Get-CimInstance is the modern replacement for Get-WmiObject (PowerShell 3+/Windows 10+).
-    // It is faster and does not require WinRM for local queries.
-    '(Get-CimInstance Win32_Process).CommandLine',
-  ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
-    windowsAgentRefreshing = false;
-    if (err) {
-      console.warn('Windows agent detection failed:', err.message);
-      return;
-    }
-    const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    let found = AGENT.GENERIC;
-    outer: for (const pat of CLI_AGENT_PATTERNS) {
-      for (const line of lines) {
-        if (pat.regex.test(line)) { found = pat.type; break outer; }
+  try {
+    execFile('powershell', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      // Get-CimInstance is the modern replacement for Get-WmiObject (PowerShell 3+/Windows 10+).
+      // It is faster and does not require WinRM for local queries.
+      '(Get-CimInstance Win32_Process).CommandLine',
+    ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
+      windowsAgentRefreshing = false;
+      if (err) {
+        console.warn('Windows agent detection failed:', err.message);
+        return;
       }
-    }
-    windowsAgentCache = { type: found, at: Date.now() };
-  });
+      const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      let found = AGENT.GENERIC;
+      outer: for (const pat of CLI_AGENT_PATTERNS) {
+        for (const line of lines) {
+          if (pat.regex.test(line)) { found = pat.type; break outer; }
+        }
+      }
+      windowsAgentCache = { type: found, at: Date.now() };
+    });
+  } catch (e) {
+    windowsAgentRefreshing = false;
+    console.warn('Windows agent detection spawn failed:', e.message);
+  }
 }
 
 /** Pre-warm the Windows agent cache when the overlay is spawned. */
@@ -853,21 +858,26 @@ function prefetchWindowsAgent() {
   const now = Date.now();
   if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS || windowsAgentRefreshing) return;
   windowsAgentRefreshing = true;
-  execFile('powershell', [
-    '-NoProfile', '-NonInteractive', '-Command',
-    '(Get-CimInstance Win32_Process).CommandLine',
-  ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
-    windowsAgentRefreshing = false;
-    if (err) return;
-    const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    let found = AGENT.GENERIC;
-    outer: for (const pat of CLI_AGENT_PATTERNS) {
-      for (const line of lines) {
-        if (pat.regex.test(line)) { found = pat.type; break outer; }
+  try {
+    execFile('powershell', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      '(Get-CimInstance Win32_Process).CommandLine',
+    ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
+      windowsAgentRefreshing = false;
+      if (err) return;
+      const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      let found = AGENT.GENERIC;
+      outer: for (const pat of CLI_AGENT_PATTERNS) {
+        for (const line of lines) {
+          if (pat.regex.test(line)) { found = pat.type; break outer; }
+        }
       }
-    }
-    windowsAgentCache = { type: found, at: Date.now() };
-  });
+      windowsAgentCache = { type: found, at: Date.now() };
+    });
+  } catch (e) {
+    windowsAgentRefreshing = false;
+    console.warn('Windows agent prefetch spawn failed:', e.message);
+  }
 }
 
 // ── Windows macro primitives ─────────────────────────────────────────────────
