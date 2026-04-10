@@ -67,6 +67,7 @@ WORK_Faster_WORK auto-detects which agent is running and sends the correct keybo
 | **Cursor** | `com.todesktop.230313mzl4w4u92` | Text + Enter (chat) | ✅ Tested |
 | **Windsurf** (Codeium) | `com.codeium.windsurf` | Text + Enter (chat) | ✅ Tested |
 | **Trae** (ByteDance) | `com.bytedance.trae` / `ai.trae.Trae` | Text + Enter (chat) | ⚠️ Untested – theoretically viable |
+| **QQ** (Tencent) | `com.tencent.qq` | Text + Enter (send) | ⚠️ Untested – theoretically viable |
 
 ### CLI agents (all platforms — detected by process name)
 
@@ -83,6 +84,7 @@ WORK_Faster_WORK auto-detects which agent is running and sends the correct keybo
 | **Antigravity** | `antigravity` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ✅ Tested |
 | **Qoder** | `qoder` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
 | **Copaw** | `copaw` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
+| **QQ** (Tencent, Win/Linux) | `qq`, `QQ.exe` | None (chat input) | Text + Enter | ⚠️ Untested – theoretically viable |
 | **Other / fallback** | — | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | — |
 
 > **macOS:** terminal process detection uses the TTY (`ps -t <tty>`) for Apple Terminal, falling back to window title for all other terminal emulators (iTerm2, WezTerm, Ghostty, Warp, Hyper).
@@ -93,7 +95,9 @@ WORK_Faster_WORK auto-detects which agent is running and sends the correct keybo
 
 > **Overlay display area:** the overlay spans the full virtual desktop across all monitors (not only the primary display).
 
-> **Windows:** uses PowerShell (`Get-CimInstance Win32_Process`) to detect which agent is running. Macro strategy is agent-aware: Codex CLI gets a plain follow-up (no interrupt); Aider gets Ctrl+C (it shows a Y/N prompt, so it won't exit immediately); all other CLIs (Claude Code, Gemini, Copilot, Qwen, generic) get Escape to abort the current streaming response without exiting. Text is always sent via clipboard paste (Ctrl+V) so Unicode / CJK characters work correctly and no characters are dropped on consecutive cracks.
+> **Windows:** uses PowerShell (`Get-CimInstance Win32_Process`) to detect which agent is running. The cached result is returned immediately on every crack (stale-while-revalidate), so the macro fires without delay. Macro strategy is agent-aware: Codex CLI gets a plain follow-up (no interrupt); Aider gets Ctrl+C (it shows a Y/N prompt, so it won't exit immediately); QQ gets a plain text + Enter (no interrupt, Enter or Ctrl+Enter both work); all other CLIs (Claude Code, Gemini, Copilot, Qwen, generic) get Escape to abort the current streaming response without exiting. Text is always sent via clipboard paste (Ctrl+V) so Unicode / CJK characters work correctly and no characters are dropped on consecutive cracks.
+
+> **QQ (Windows/Linux):** QQ is detected when no other CLI agent is running. QQ's default message-send key is **Enter**; if you have configured QQ to use **Ctrl+Enter** to send, set QQ's send key back to Enter, or simply press Ctrl+Enter yourself after the whip fills in the text. On macOS, QQ is detected by bundle ID `com.tencent.qq` when it is the frontmost app.
 
 > **GitHub Copilot CLI caveat:** `gh copilot suggest` is a one-shot command — each invocation consumes **one API request**. When this app interrupts Copilot CLI and re-submits your phrase, it starts a brand-new suggestion request, so each whip crack uses one API quota slot.
 

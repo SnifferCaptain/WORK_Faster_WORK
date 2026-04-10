@@ -67,6 +67,7 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 | **Cursor** | `com.todesktop.230313mzl4w4u92` | 文本 + Enter（聊天）| ✅ 已测试 |
 | **Windsurf**（Codeium）| `com.codeium.windsurf` | 文本 + Enter（聊天）| ✅ 已测试 |
 | **Trae**（字节跳动）| `com.bytedance.trae` / `ai.trae.Trae` | 文本 + Enter（聊天）| ⚠️ 未经测试 — 理论可行 |
+| **QQ**（腾讯）| `com.tencent.qq` | 文本 + Enter（发送）| ⚠️ 未经测试 — 理论可行 |
 
 ### CLI Agent（全平台 — 通过进程名检测）
 
@@ -83,6 +84,7 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 | **Antigravity** | `antigravity` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ✅ 已测试 |
 | **Qoder** | `qoder` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
 | **Copaw** | `copaw` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
+| **QQ**（腾讯，Windows/Linux）| `qq`、`QQ.exe` | 无中断（聊天输入框）| 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
 | **其他 / 兜底** | — | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | — |
 
 > **macOS：** 终端进程检测优先通过 TTY（`ps -t <tty>`，适用于 Apple Terminal），其他终端模拟器（iTerm2、WezTerm、Ghostty、Warp、Hyper）则通过窗口标题兜底。
@@ -93,7 +95,9 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 
 > **Overlay 覆盖范围：** overlay 会覆盖所有显示器组成的虚拟桌面，而不只主屏幕。
 
-> **Windows：** 通过 PowerShell（`Get-CimInstance Win32_Process`）检测当前运行的 Agent。宏策略因 Agent 而异：Codex CLI 直接发送跟进消息（无中断）；Aider 使用 Ctrl+C（它会显示 Y/N 确认，不会立即退出）；其他所有 CLI（Claude Code、Gemini、Copilot、通义灵码等）使用 Escape 中止当前流式输出而不退出程序。文字始终通过剪贴板粘贴（Ctrl+V）发送，因此支持中文等 Unicode 字符，且连续挥鞭时不会丢失开头字符。
+> **Windows：** 通过 PowerShell（`Get-CimInstance Win32_Process`）检测当前运行的 Agent。检测采用"过期缓存立即返回"策略（stale-while-revalidate）：每次挥鞭时立即使用缓存值触发宏，后台异步刷新缓存，无需等待 PowerShell 响应。宏策略因 Agent 而异：Codex CLI 直接发送跟进消息（无中断）；Aider 使用 Ctrl+C（它会显示 Y/N 确认，不会立即退出）；QQ 直接发送文本 + Enter（无中断，Enter 或 Ctrl+Enter 均可在 QQ 中发送消息）；其他所有 CLI（Claude Code、Gemini、Copilot、通义灵码等）使用 Escape 中止当前流式输出而不退出程序。文字始终通过剪贴板粘贴（Ctrl+V）发送，因此支持中文等 Unicode 字符，且连续挥鞭时不会丢失开头字符。
+
+> **QQ（Windows/Linux）：** 仅在没有其他 CLI Agent 运行时才会检测到 QQ（CLI Agent 优先级更高）。QQ 默认发送键为 **Enter**；如果你已将 QQ 配置为 **Ctrl+Enter** 发送，可将 QQ 发送键改回 Enter，或在挥鞭填入文字后手动按 Ctrl+Enter 发送。在 macOS 上，QQ 通过 Bundle ID `com.tencent.qq` 检测，且仅在 QQ 为最前台应用时生效。
 
 > **GitHub Copilot CLI 注意事项：** `gh copilot suggest` 是单次执行命令——每次调用会消耗 **一个 API 请求额度**。本应用在中断 Copilot CLI 并重新提交短语时，会发起一个全新的 suggestion 请求，因此每次挥鞭均会消耗一个 API 配额。
 

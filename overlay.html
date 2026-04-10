@@ -68,6 +68,20 @@ const P = {
 
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Precompute per-joint bend thresholds (dot-product form of the maxBend angle)
+// so applyBendLimits() can skip Math.acos unless the limit is actually exceeded.
+// Threshold[i-1] corresponds to joint i (1 ≤ i ≤ segments-2).
+// bend ≤ maxBend  ↔  dot ≤ cos(π − maxBend)  = −cos(maxBend).
+const BEND_COS_THRESHOLDS = (() => {
+  const thresholds = [];
+  for (let i = 1; i < P.segments - 1; i++) {
+    const t = i / (P.segments - 2);
+    const maxBendRad = lerp(P.handleMaxBendDeg, P.tipMaxBendDeg, t) * Math.PI / 180;
+    thresholds.push(Math.cos(Math.PI - maxBendRad));
+  }
+  return thresholds;
+})();
+
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 let W, H;
@@ -227,11 +241,16 @@ function applyBendLimits() {
     const n2x = v2x / l2, n2y = v2y / l2;
 
     const dot = clamp(n1x * n2x + n1y * n2y, -1, 1);
+
+    // Fast rejection: compare dot against precomputed threshold to skip Math.acos
+    // when the joint is within its bend limit (the common case).
+    // bend = π − acos(dot); bend ≤ maxBend  ↔  dot ≤ cos(π − maxBend) (= threshold).
+    if (dot <= BEND_COS_THRESHOLDS[i - 1]) continue;
+
+    // Bend limit exceeded – compute full correction.
     const angle = Math.acos(dot);
     const t = i / (whip.length - 2);
     const maxBend = lerp(P.handleMaxBendDeg, P.tipMaxBendDeg, t) * Math.PI / 180;
-    const bend = Math.PI - angle; // bend away from a straight line
-    if (bend <= maxBend) continue;
 
     // Clamp to max bend while preserving side/sign of the bend.
     const cross = n1x * n2y - n1y * n2x;
@@ -479,10 +498,10 @@ function spawnMilestoneEffect(x, y, level, count) {
     const spd    = speed * (0.5 + Math.random() * 0.9);
     const color  = palette[i % palette.length];
     const pLife  = lifeBase * (0.7 + Math.random() * 0.6);
-    // type: n=0–1 → golden stars; n=2 → pure spark shower (firework look);
-    //        n≥3  → sparks with 1-in-4 confetti ribbons for extra texture
+    // type: n=0–1 → golden stars; n=2–3 → pure spark shower (firework look);
+    //        n≥4  → sparks with 1-in-4 confetti ribbons for extra texture
     const type = (level < 2) ? 'star'
-               : (level >= 3 && i % 4 === 0) ? 'confetti'
+               : (level >= 4 && i % 4 === 0) ? 'confetti'
                : 'spark';
     particles.push({
       x, y, px: x, py: y,
@@ -647,13 +666,13 @@ function drawMilestoneEffects() {
 
       } else if (p.type === 'confetti') {
         // Confetti needs per-particle rotation – can't be batched into a shared path.
+        // Use setTransform to avoid save/restore stack overhead.
+        const c = Math.cos(p.angle), s = Math.sin(p.angle);
+        ctx.setTransform(c, s, -s, c, p.x, p.y);
         ctx.globalAlpha = alpha;
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.angle);
         ctx.fillStyle = p.color;
         ctx.fillRect(-p.size * 0.4, -p.size * 1.4, p.size * 0.8, p.size * 2.8);
-        ctx.restore();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
 
       } else {
         // star

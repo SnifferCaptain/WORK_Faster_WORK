@@ -23,6 +23,7 @@ const AGENT = {
   ANTIGRAVITY_CLI:'antigravity-cli',// Antigravity CLI [untested]
   QODER_CLI:      'qoder-cli',      // Qoder CLI [untested]
   COPAW_CLI:      'copaw-cli',      // Copaw CLI [untested]
+  QQ_APP:         'qq-app',         // QQ chat (Tencent)
   GENERIC:        'generic',        // fallback
 };
 
@@ -34,6 +35,8 @@ const BUNDLE_AGENTS = new Map([
   // Trae (ByteDance AI IDE) – both observed bundle ID variants
   ['com.bytedance.trae',            AGENT.TRAE_APP],
   ['ai.trae.Trae',                  AGENT.TRAE_APP],
+  // QQ (Tencent) – detected when QQ is the frontmost macOS app
+  ['com.tencent.qq',                AGENT.QQ_APP],
 ]);
 
 // macOS: known terminal emulator bundle IDs (used for CLI detection)
@@ -63,6 +66,9 @@ const CLI_AGENT_PATTERNS = [
   { regex: /(^|[/ ])antigravity(\s|$)/i,                type: AGENT.ANTIGRAVITY_CLI },
   { regex: /(^|[/ ])qoder(\s|$)/i,                      type: AGENT.QODER_CLI },
   { regex: /(^|[/ ])copaw(\s|$)/i,                      type: AGENT.COPAW_CLI },
+  // QQ chat (Tencent) – placed last so CLI agents always take priority when both run.
+  // On Windows the process is typically QQ.exe; on Linux it is qq.
+  { regex: /(^|[/ ])qq(\.exe)?(\s|$)/i,                type: AGENT.QQ_APP },
 ];
 
 // ── Win32 FFI (Windows only) ────────────────────────────────────────────────
@@ -101,18 +107,19 @@ const MACRO_SEND_FAILED_TITLE = 'WORK Faster WORK: macro send failed';
 const WINDOWS_AGENT_CACHE_TTL_MS = 5000;
 const WINDOWS_AGENT_DETECTION_TIMEOUT_MS = 3000;
 let windowsAgentCache = { type: AGENT.GENERIC, at: 0 };
+let windowsAgentRefreshing = false; // prevents concurrent PowerShell spawns
 
 // ── Windows clipboard restore state (shared across rapid cracks) ─────────────
 // PASTE_TO_ENTER_DELAY_MS: give the terminal time to receive the paste before Enter.
 // CLIPBOARD_RESTORE_DEBOUNCE_MS: debounce window; clipboard is restored this long
 // after the last whip crack in a burst.
 const PASTE_TO_ENTER_DELAY_MS = 60;
-const INTERRUPT_TO_PASTE_DELAY_MS = 100;
+const INTERRUPT_TO_PASTE_DELAY_MS = 200;
 const CLIPBOARD_RESTORE_DEBOUNCE_MS = 400;
 // After sending ctrl+c to interrupt a CLI, wait this long before typing so the
 // terminal has time to interrupt the running task and restore the prompt.
 // Starting to type immediately can cause the first few characters to be lost.
-const LINUX_INTERRUPT_TO_TYPE_DELAY_MS = 150;
+const LINUX_INTERRUPT_TO_TYPE_DELAY_MS = 300;
 let clipboardRestoreTimer = null;
 let clipboardOriginal = null;
 // Tracks whether we have already attempted a clipboard read for this burst.
@@ -403,13 +410,17 @@ function loadWhipCount() {
 }
 
 function saveWhipCount() {
-  try {
-    const dir = app.getPath('userData');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(WHIP_COUNT_FILE(), JSON.stringify({ count: whipCount }));
-  } catch (e) {
-    console.warn(`[${APP_SLUG}] Failed to save whip count:`, e.message);
-  }
+  const dir = app.getPath('userData');
+  const data = JSON.stringify({ count: whipCount });
+  fs.mkdir(dir, { recursive: true }, mkdirErr => {
+    if (mkdirErr) {
+      console.warn(`[${APP_SLUG}] Failed to create userData dir:`, mkdirErr.message);
+      return;
+    }
+    fs.writeFile(WHIP_COUNT_FILE(), data, writeErr => {
+      if (writeErr) console.warn(`[${APP_SLUG}] Failed to save whip count:`, writeErr.message);
+    });
+  });
 }
 
 /** Returns true if n is a positive power of two (1, 2, 4, 8, …). */
@@ -650,7 +661,7 @@ function macInterruptAndType(text) {
   runAppleScript([
     'tell application "System Events"',
     '  key code 8 using {command down}',  // Cmd+C (interrupt)
-    '  delay 0.05',
+    '  delay 0.15',
     `  keystroke "${escapeAppleScriptString(text)}"`,
     '  key code 36',                       // Enter
     'end tell',
@@ -799,22 +810,31 @@ function sendMacro() {
 // ── Windows agent detection ─────────────────────────────────────────────────
 /**
  * Detect the active agent on Windows by scanning running process command lines
- * via PowerShell/WMI. Result is cached for WINDOWS_AGENT_CACHE_TTL_MS.
+ * via PowerShell/WMI.
+ *
+ * Uses a stale-while-revalidate strategy: the cached value is returned
+ * immediately (even if stale) so the macro fires without blocking, while a
+ * background refresh keeps the cache fresh for subsequent cracks.
  */
 function detectAgentWindows(cb) {
+  // Always callback immediately with the current cached value so the macro
+  // fires at once without waiting for PowerShell to respond.
+  cb(windowsAgentCache.type);
+
   const now = Date.now();
-  if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS) {
-    return cb(windowsAgentCache.type);
-  }
+  // Refresh in background if the cache is stale and no refresh is in progress.
+  if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS || windowsAgentRefreshing) return;
+  windowsAgentRefreshing = true;
   execFile('powershell', [
     '-NoProfile', '-NonInteractive', '-Command',
     // Get-CimInstance is the modern replacement for Get-WmiObject (PowerShell 3+/Windows 10+).
     // It is faster and does not require WinRM for local queries.
     '(Get-CimInstance Win32_Process).CommandLine',
   ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
+    windowsAgentRefreshing = false;
     if (err) {
       console.warn('Windows agent detection failed:', err.message);
-      return cb(AGENT.GENERIC);
+      return;
     }
     const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     let found = AGENT.GENERIC;
@@ -824,7 +844,6 @@ function detectAgentWindows(cb) {
       }
     }
     windowsAgentCache = { type: found, at: Date.now() };
-    cb(found);
   });
 }
 
@@ -832,8 +851,23 @@ function detectAgentWindows(cb) {
 function prefetchWindowsAgent() {
   if (process.platform !== 'win32') return;
   const now = Date.now();
-  if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS) return;
-  detectAgentWindows(() => {}); // fire-and-forget to populate cache
+  if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS || windowsAgentRefreshing) return;
+  windowsAgentRefreshing = true;
+  execFile('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    '(Get-CimInstance Win32_Process).CommandLine',
+  ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
+    windowsAgentRefreshing = false;
+    if (err) return;
+    const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let found = AGENT.GENERIC;
+    outer: for (const pat of CLI_AGENT_PATTERNS) {
+      for (const line of lines) {
+        if (pat.regex.test(line)) { found = pat.type; break outer; }
+      }
+    }
+    windowsAgentCache = { type: found, at: Date.now() };
+  });
 }
 
 // ── Windows macro primitives ─────────────────────────────────────────────────
@@ -942,6 +976,10 @@ function sendMacroWindows(text) {
         // Aider shows a Y/N confirmation on Ctrl+C and won't exit immediately.
         windowsCtrlCThenType(text);
         break;
+      case AGENT.QQ_APP:
+        // QQ chat: paste text and press Enter to send (no interrupt needed).
+        windowsPasteAndEnter(text);
+        break;
       default:
         // Claude Code, Gemini CLI, Copilot CLI, Qwen CLI, generic:
         // ESC aborts the current streaming response without exiting the CLI.
@@ -965,6 +1003,9 @@ function sendMacroMac(text) {
       case AGENT.CODEX_CLI:
         macTypeAndEnter(text);     // Codex CLI: follow-up without interrupt
         break;
+      case AGENT.QQ_APP:
+        macTypeAndEnter(text);     // QQ chat: type + Enter (no interrupt)
+        break;
       default:
         // Claude CLI, Copilot CLI, Aider, Gemini CLI, Qwen CLI,
         // Open Claw, Antigravity, Qoder, Copaw, generic: interrupt + type
@@ -979,6 +1020,9 @@ function sendMacroLinux(text) {
     switch (agentType) {
       case AGENT.CODEX_CLI:
         linuxTypeAndEnter(text);   // Codex CLI: follow-up without interrupt
+        break;
+      case AGENT.QQ_APP:
+        linuxTypeAndEnter(text);   // QQ chat: type + Enter (no interrupt)
         break;
       default:
         // All others: interrupt + type
