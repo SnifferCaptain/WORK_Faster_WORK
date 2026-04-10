@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, dialog, Notification, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -66,13 +66,12 @@ const CLI_AGENT_PATTERNS = [
 ];
 
 // ── Win32 FFI (Windows only) ────────────────────────────────────────────────
-let keybd_event, VkKeyScanA;
+let keybd_event;
 if (process.platform === 'win32') {
   try {
     const koffi = require('koffi');
     const user32 = koffi.load('user32.dll');
     keybd_event = user32.func('void __stdcall keybd_event(uint8_t bVk, uint8_t bScan, uint32_t dwFlags, uintptr_t dwExtraInfo)');
-    VkKeyScanA = user32.func('int16_t __stdcall VkKeyScanA(int ch)');
   } catch (e) {
     console.warn('koffi not available – macro sending disabled', e.message);
   }
@@ -87,9 +86,38 @@ let whipCount = 0;  // total lifetime whip cracks
 const VK_CONTROL = 0x11;
 const VK_RETURN  = 0x0D;
 const VK_C       = 0x43;
+const VK_V       = 0x56;
+const VK_ESCAPE  = 0x1B;
 const VK_MENU    = 0x12; // Alt
 const VK_TAB     = 0x09;
 const KEYUP      = 0x0002;
+const YDOTOOL_KEY_ENTER = '28';
+const YDOTOOL_KEY_LEFTCTRL = '29';
+const YDOTOOL_KEY_C = '46';
+const MACRO_ERROR_THROTTLE_MS = 3000;
+const MACRO_SEND_FAILED_TITLE = 'WORK Faster WORK: macro send failed';
+
+// ── Windows agent detection cache ───────────────────────────────────────────
+const WINDOWS_AGENT_CACHE_TTL_MS = 5000;
+const WINDOWS_AGENT_DETECTION_TIMEOUT_MS = 3000;
+let windowsAgentCache = { type: AGENT.GENERIC, at: 0 };
+
+// ── Windows clipboard restore state (shared across rapid cracks) ─────────────
+// PASTE_TO_ENTER_DELAY_MS: give the terminal time to receive the paste before Enter.
+// CLIPBOARD_RESTORE_DEBOUNCE_MS: debounce window; clipboard is restored this long
+// after the last whip crack in a burst.
+const PASTE_TO_ENTER_DELAY_MS = 60;
+const INTERRUPT_TO_PASTE_DELAY_MS = 100;
+const CLIPBOARD_RESTORE_DEBOUNCE_MS = 400;
+// After sending ctrl+c to interrupt a CLI, wait this long before typing so the
+// terminal has time to interrupt the running task and restore the prompt.
+// Starting to type immediately can cause the first few characters to be lost.
+const LINUX_INTERRUPT_TO_TYPE_DELAY_MS = 150;
+let clipboardRestoreTimer = null;
+let clipboardOriginal = null;
+// Tracks whether we have already attempted a clipboard read for this burst.
+// Prevents re-reading on every consecutive crack; reset after the burst ends.
+let clipboardReadAttempted = false;
 
 /** One Alt+Tab / Cmd+Tab so focus returns to the previously active app after tray click. */
 function refocusPreviousApp() {
@@ -112,9 +140,8 @@ function refocusPreviousApp() {
         if (err) console.warn('refocus previous app (Cmd+Tab) failed:', err.message);
       });
     } else if (process.platform === 'linux') {
-      execFile('xdotool', ['key', 'alt+Tab'], err => {
-        if (err) console.warn('refocus previous app (alt+Tab) failed – is xdotool installed?:', err.message);
-      });
+      // No-op on Linux: Alt+Tab automation is fragile across desktop
+      // environments/window managers and frequently blocked on Wayland.
     }
   };
   setTimeout(run, delayMs);
@@ -179,8 +206,23 @@ async function getTrayIcon() {
 }
 
 // ── Overlay window ──────────────────────────────────────────────────────────
+function getVirtualDisplayBounds() {
+  const displays = screen.getAllDisplays();
+  if (!displays || displays.length === 0) return screen.getPrimaryDisplay().bounds;
+  const left = Math.min(...displays.map(d => d.bounds.x));
+  const top = Math.min(...displays.map(d => d.bounds.y));
+  const right = Math.max(...displays.map(d => d.bounds.x + d.bounds.width));
+  const bottom = Math.max(...displays.map(d => d.bounds.y + d.bounds.height));
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
 function createOverlay() {
-  const { bounds } = screen.getPrimaryDisplay();
+  const bounds = getVirtualDisplayBounds();
   overlay = new BrowserWindow({
     x: bounds.x, y: bounds.y,
     width: bounds.width, height: bounds.height,
@@ -213,12 +255,10 @@ function createOverlay() {
   });
 }
 
-function toggleOverlay() {
-  if (overlay && overlay.isVisible()) {
-    overlay.webContents.send('drop-whip');
-    return;
-  }
+function showOverlayAndSpawn() {
+  prefetchWindowsAgent();
   if (!overlay) createOverlay();
+  if (!overlay) return;
   overlay.show();
   if (overlayReady) {
     overlay.webContents.send('spawn-whip');
@@ -226,6 +266,20 @@ function toggleOverlay() {
   } else {
     spawnQueued = true;
   }
+}
+
+function showOverlayOnly() {
+  if (!overlay) createOverlay();
+  if (!overlay) return;
+  overlay.show();
+}
+
+function toggleOverlay() {
+  if (overlay && overlay.isVisible()) {
+    overlay.webContents.send('drop-whip');
+    return;
+  }
+  showOverlayAndSpawn();
 }
 
 // ── IPC ─────────────────────────────────────────────────────────────────────
@@ -246,12 +300,17 @@ function guardOverlayEvent(event, channel) {
   return false;
 }
 
+function notifyMacroSendFailed(err, detailPrefix = 'Failed to send macro:') {
+  notifyUser(MACRO_SEND_FAILED_TITLE, `${detailPrefix} ${err?.message || String(err)}`);
+}
+
 ipcMain.on('whip-crack', event => {
   if (!guardOverlayEvent(event, 'whip-crack')) return;
   try {
     sendMacro();
   } catch (err) {
     console.warn('sendMacro failed:', err?.message || err);
+    notifyMacroSendFailed(err);
   }
 
   // Track lifetime crack count and fire milestone effects at powers of two
@@ -364,6 +423,26 @@ function updateTrayMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Whip cracks: ${whipCount}`, enabled: false },
+      { type: 'separator' },
+      {
+        label: 'Spawn Whip',
+        click: () => showOverlayAndSpawn(),
+      },
+      {
+        label: 'Test Overlay',
+        click: () => showOverlayOnly(),
+      },
+      {
+        label: 'Crack Now',
+        click: () => {
+          try {
+            sendMacro();
+          } catch (err) {
+            console.warn('sendMacro failed:', err?.message || err);
+            notifyMacroSendFailed(err);
+          }
+        },
+      },
       { type: 'separator' },
       {
         label: 'Open Config Folder',
@@ -531,11 +610,35 @@ function detectAgentMac(cb) {
  * Returns AGENT.* string via callback.
  */
 function detectAgentLinux(cb) {
-  execFile('ps', ['aux'], (err, stdout) => {
+  execFile('ps', ['-eo', 'tty,pid,args', '--no-headers'], (err, stdout) => {
     if (err) return cb(AGENT.GENERIC);
     const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
+    const candidates = [];
     for (const pat of CLI_AGENT_PATTERNS) {
-      if (lines.some(line => pat.regex.test(line))) return cb(pat.type);
+      for (const line of lines) {
+        // Expected format from `ps -eo tty,pid,args --no-headers`:
+        // "<TTY> <PID> <COMMAND...>"
+        const m = line.match(/^(\S+)\s+(\d+)\s+(.*)$/);
+        if (!m) continue;
+        const tty = m[1];
+        const pid = Number(m[2]);
+        const command = m[3];
+        if (!pat.regex.test(command)) continue;
+        candidates.push({
+          type: pat.type,
+          ttyInteractive: tty !== '?',
+          pid,
+        });
+      }
+    }
+    if (candidates.length > 0) {
+      // Prioritize likely active interactive sessions first (TTY != '?'),
+      // then prefer newer processes (larger PID) within that bucket.
+      candidates.sort((a, b) => {
+        if (a.ttyInteractive !== b.ttyInteractive) return a.ttyInteractive ? -1 : 1;
+        return b.pid - a.pid;
+      });
+      return cb(candidates[0].type);
     }
     cb(AGENT.GENERIC);
   });
@@ -582,25 +685,98 @@ function macTypeAndCmdEnter(text) {
   });
 }
 
-// ── Linux macro primitives (xdotool) ────────────────────────────────────────
+// ── Linux macro primitives (xdotool / ydotool) ─────────────────────────────
+function notifyUser(title, body) {
+  try {
+    if (Notification.isSupported()) {
+      new Notification({ title, body, silent: true }).show();
+      return;
+    }
+    dialog.showMessageBox({
+      type: 'warning',
+      title,
+      message: body,
+      buttons: ['OK'],
+      noLink: true,
+    }).catch(() => {});
+  } catch (e) {
+    console.warn('notifyUser failed:', e?.message || e);
+  }
+}
+
+function isWaylandSession() {
+  // XDG_SESSION_TYPE is the most reliable indicator; check it first so that
+  // XWayland sessions (XDG_SESSION_TYPE=x11 + WAYLAND_DISPLAY set) still use
+  // xdotool rather than ydotool.  Fall back to WAYLAND_DISPLAY when the
+  // variable is absent (e.g. some minimal setups).
+  if (process.env.XDG_SESSION_TYPE) {
+    return process.env.XDG_SESSION_TYPE === 'wayland';
+  }
+  return !!process.env.WAYLAND_DISPLAY;
+}
+
+function getLinuxMacroBackend() {
+  return isWaylandSession() ? 'ydotool' : 'xdotool';
+}
+
+let lastLinuxMacroErrorAt = 0;
+function notifyLinuxMacroFailure(toolName, err) {
+  const now = Date.now();
+  if (now - lastLinuxMacroErrorAt < MACRO_ERROR_THROTTLE_MS) return;
+  lastLinuxMacroErrorAt = now;
+  const setupHint = toolName === 'ydotool'
+    ? 'Wayland detected. Install ydotool and ensure ydotoold is running.'
+    : 'Install xdotool (X11), or run under Wayland with ydotool + ydotoold.';
+  notifyMacroSendFailed(err, `${toolName} command failed. ${setupHint} Root error:`);
+}
+
+function execLinuxMacro(toolName, args, label, cb) {
+  execFile(toolName, args, err => {
+    if (err) {
+      console.warn(`${toolName} ${label} failed:`, err.message);
+      notifyLinuxMacroFailure(toolName, err);
+      return cb && cb(err);
+    }
+    cb && cb(null);
+  });
+}
+
 function xdotoolTypeAndReturn(text, cb) {
-  execFile('xdotool', ['type', '--clearmodifiers', '--delay', '20', text], err => {
-    if (err) { console.warn('xdotool type failed:', err.message); return cb && cb(err); }
-    execFile('xdotool', ['key', 'Return'], err => {
-      if (err) console.warn('xdotool Return failed:', err.message);
-      cb && cb(err || null);
+  const toolName = getLinuxMacroBackend();
+  if (toolName === 'ydotool') {
+    execLinuxMacro('ydotool', ['type', '--key-delay', '20', text], 'type', err => {
+      if (err) return cb && cb(err);
+      // Linux input-event keycodes: 28 = KEY_ENTER.
+      execLinuxMacro('ydotool', ['key', `${YDOTOOL_KEY_ENTER}:1`, `${YDOTOOL_KEY_ENTER}:0`], 'Return', keyErr => {
+        cb && cb(keyErr || null);
+      });
+    });
+    return;
+  }
+
+  execLinuxMacro('xdotool', ['type', '--clearmodifiers', '--delay', '20', text], 'type', err => {
+    if (err) return cb && cb(err);
+    execLinuxMacro('xdotool', ['key', 'Return'], 'Return', keyErr => {
+      cb && cb(keyErr || null);
     });
   });
 }
 
 function linuxInterruptAndType(text) {
-  // Requires xdotool: sudo apt install xdotool  (X11; Wayland users need ydotool)
-  execFile('xdotool', ['key', 'ctrl+c'], err => {
+  const toolName = getLinuxMacroBackend();
+  // Linux input-event keycodes: 29 = KEY_LEFTCTRL, 46 = KEY_C.
+  const ctrlCArgs = toolName === 'ydotool'
+    ? ['key', `${YDOTOOL_KEY_LEFTCTRL}:1`, `${YDOTOOL_KEY_C}:1`, `${YDOTOOL_KEY_C}:0`, `${YDOTOOL_KEY_LEFTCTRL}:0`]
+    : ['key', 'ctrl+c'];
+  execLinuxMacro(toolName, ctrlCArgs, 'ctrl+c', err => {
     if (err) {
-      console.warn('xdotool ctrl+c failed – is xdotool installed?:', err.message);
       return;
     }
-    xdotoolTypeAndReturn(text);
+    // The xdotool key process finishes quickly (it just injects the keypress),
+    // but the CLI process needs a moment to actually handle SIGINT and return
+    // to the prompt.  If we start typing immediately the terminal may still be
+    // processing the interrupt and will silently swallow the first few chars.
+    setTimeout(() => xdotoolTypeAndReturn(text), LINUX_INTERRUPT_TO_TYPE_DELAY_MS);
   });
 }
 
@@ -620,30 +796,159 @@ function sendMacro() {
   }
 }
 
-function sendMacroWindows(text) {
-  if (!keybd_event || !VkKeyScanA) return;
-  const tapKey = vk => {
-    keybd_event(vk, 0, 0, 0);
-    keybd_event(vk, 0, KEYUP, 0);
-  };
-  const tapChar = ch => {
-    const packed = VkKeyScanA(ch.charCodeAt(0));
-    if (packed === -1) return;
-    const vk = packed & 0xff;
-    const shiftState = (packed >> 8) & 0xff;
-    if (shiftState & 1) keybd_event(0x10, 0, 0, 0); // Shift down
-    tapKey(vk);
-    if (shiftState & 1) keybd_event(0x10, 0, KEYUP, 0); // Shift up
-  };
+// ── Windows agent detection ─────────────────────────────────────────────────
+/**
+ * Detect the active agent on Windows by scanning running process command lines
+ * via PowerShell/WMI. Result is cached for WINDOWS_AGENT_CACHE_TTL_MS.
+ */
+function detectAgentWindows(cb) {
+  const now = Date.now();
+  if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS) {
+    return cb(windowsAgentCache.type);
+  }
+  execFile('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    // Get-CimInstance is the modern replacement for Get-WmiObject (PowerShell 3+/Windows 10+).
+    // It is faster and does not require WinRM for local queries.
+    '(Get-CimInstance Win32_Process).CommandLine',
+  ], { timeout: WINDOWS_AGENT_DETECTION_TIMEOUT_MS }, (err, stdout) => {
+    if (err) {
+      console.warn('Windows agent detection failed:', err.message);
+      return cb(AGENT.GENERIC);
+    }
+    const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let found = AGENT.GENERIC;
+    outer: for (const pat of CLI_AGENT_PATTERNS) {
+      for (const line of lines) {
+        if (pat.regex.test(line)) { found = pat.type; break outer; }
+      }
+    }
+    windowsAgentCache = { type: found, at: Date.now() };
+    cb(found);
+  });
+}
 
-  // Ctrl+C (interrupt)
+/** Pre-warm the Windows agent cache when the overlay is spawned. */
+function prefetchWindowsAgent() {
+  if (process.platform !== 'win32') return;
+  const now = Date.now();
+  if (now - windowsAgentCache.at < WINDOWS_AGENT_CACHE_TTL_MS) return;
+  detectAgentWindows(() => {}); // fire-and-forget to populate cache
+}
+
+// ── Windows macro primitives ─────────────────────────────────────────────────
+/**
+ * Paste `text` via the clipboard (Ctrl+V) and then press Enter.
+ * Uses the clipboard for two reasons:
+ *   1. Unicode / CJK characters work correctly (VkKeyScanA is ASCII-only).
+ *   2. Paste is atomic, so no characters are dropped on consecutive cracks.
+ * The original clipboard content is saved before the first crack in a sequence
+ * and restored 400 ms after the last crack.
+ */
+function windowsPasteAndEnter(text) {
+  if (!keybd_event) return;
+
+  // Preserve the user's clipboard for the first crack in a burst.
+  if (clipboardRestoreTimer === null && !clipboardReadAttempted) {
+    clipboardReadAttempted = true;
+    try {
+      clipboardOriginal = clipboard.readText();
+    } catch (e) {
+      console.warn('clipboard.readText failed – clipboard will not be restored:', e?.message || e);
+      // clipboardOriginal stays null; the restore step will be skipped so we
+      // don't overwrite the user's clipboard with an empty string.
+    }
+  }
+  // Reset the debounced restore timer so each rapid crack extends the window.
+  if (clipboardRestoreTimer !== null) {
+    clearTimeout(clipboardRestoreTimer);
+    clipboardRestoreTimer = null;
+  }
+
+  try {
+    clipboard.writeText(text);
+  } catch (e) {
+    console.warn('clipboard.writeText failed – falling back to no text:', e?.message || e);
+    // If we can't write to clipboard, at least press Enter so the crack is
+    // still somewhat visible to the user, even if the text is missing.
+    keybd_event(VK_RETURN, 0, 0, 0);
+    keybd_event(VK_RETURN, 0, KEYUP, 0);
+    clipboardOriginal = null;
+    return;
+  }
+
+  // Ctrl+V – paste the text atomically.
+  keybd_event(VK_CONTROL, 0, 0, 0);
+  keybd_event(VK_V, 0, 0, 0);
+  keybd_event(VK_V, 0, KEYUP, 0);
+  keybd_event(VK_CONTROL, 0, KEYUP, 0);
+
+  // Give the terminal a moment to receive the paste before pressing Enter.
+  setTimeout(() => {
+    keybd_event(VK_RETURN, 0, 0, 0);
+    keybd_event(VK_RETURN, 0, KEYUP, 0);
+
+    // Restore clipboard after the last crack in the burst.
+    clipboardRestoreTimer = setTimeout(() => {
+      if (clipboardOriginal !== null) {
+        try {
+          clipboard.writeText(clipboardOriginal);
+        } catch (e) {
+          console.warn('clipboard restore failed:', e?.message || e);
+        }
+        clipboardOriginal = null;
+      }
+      clipboardReadAttempted = false;
+      clipboardRestoreTimer = null;
+    }, CLIPBOARD_RESTORE_DEBOUNCE_MS);
+  }, PASTE_TO_ENTER_DELAY_MS);
+}
+
+/**
+ * Send ESC to safely interrupt the current CLI task (without triggering exit),
+ * wait briefly, then paste text + Enter.
+ * Appropriate for: Claude Code, Gemini CLI, Copilot CLI, Qwen CLI, and generic.
+ */
+function windowsEscThenType(text) {
+  if (!keybd_event) return;
+  keybd_event(VK_ESCAPE, 0, 0, 0);
+  keybd_event(VK_ESCAPE, 0, KEYUP, 0);
+  setTimeout(() => windowsPasteAndEnter(text), INTERRUPT_TO_PASTE_DELAY_MS);
+}
+
+/**
+ * Send Ctrl+C (SIGINT equivalent) then paste text + Enter.
+ * Appropriate for: Aider (which shows a Y/N exit prompt and won't exit on a
+ * single Ctrl+C).
+ */
+function windowsCtrlCThenType(text) {
+  if (!keybd_event) return;
   keybd_event(VK_CONTROL, 0, 0, 0);
   keybd_event(VK_C, 0, 0, 0);
   keybd_event(VK_C, 0, KEYUP, 0);
   keybd_event(VK_CONTROL, 0, KEYUP, 0);
-  for (const ch of text) tapChar(ch);
-  keybd_event(VK_RETURN, 0, 0, 0);
-  keybd_event(VK_RETURN, 0, KEYUP, 0);
+  setTimeout(() => windowsPasteAndEnter(text), INTERRUPT_TO_PASTE_DELAY_MS);
+}
+
+function sendMacroWindows(text) {
+  if (!keybd_event) return;
+  detectAgentWindows(agentType => {
+    switch (agentType) {
+      case AGENT.CODEX_CLI:
+        // Codex CLI accepts follow-up messages directly; any interrupt exits it.
+        windowsPasteAndEnter(text);
+        break;
+      case AGENT.AIDER_CLI:
+        // Aider shows a Y/N confirmation on Ctrl+C and won't exit immediately.
+        windowsCtrlCThenType(text);
+        break;
+      default:
+        // Claude Code, Gemini CLI, Copilot CLI, Qwen CLI, generic:
+        // ESC aborts the current streaming response without exiting the CLI.
+        windowsEscThenType(text);
+        break;
+    }
+  });
 }
 
 function sendMacroMac(text) {
@@ -692,6 +997,7 @@ app.whenReady().then(async () => {
   tray.setToolTip('WORK Faster WORK – click for whip');
   updateTrayMenu();
   tray.on('click', toggleOverlay);
+  tray.on('double-click', toggleOverlay);
 });
 
 app.on('window-all-closed', e => e.preventDefault()); // keep alive in tray

@@ -13,7 +13,7 @@ WORK_Faster_WORK is a cross-platform desktop tray app that detects which AI codi
 Since this fork is not yet published to npm, install directly from GitHub:
 
 ```bash
-npm install -g SnifferCaptain/WORK_Faster_WORK#copilot/make-it-cross-platform && work-faster-work
+npm install -g SnifferCaptain/WORK_Faster_WORK#copilot/fix-linux-tray-click-issues && work-faster-work
 ```
 
 > **Note:** Once this branch is merged to the default branch, the command simplifies to:
@@ -46,7 +46,12 @@ npm uninstall -g SnifferCaptain/WORK_Faster_WORK
 
 ## Controls
 
-- **Click tray icon** → spawn whip
+- **Left-click tray icon** → spawn whip
+- **Double-click tray icon** → spawn whip (same as left-click; useful on some Linux environments that ignore single left-click)
+- **Right-click tray icon** → context menu with fallback actions:
+  - **Spawn Whip** — show overlay and immediately spawn the whip
+  - **Test Overlay** — show the overlay window without spawning the whip (useful to confirm the overlay works before cracking)
+  - **Crack Now** — send the keyboard macro to your agent directly, without going through the overlay
 - **Click on screen** → drop whip
 - **Crack the whip** 😩💢 → sends an interrupt + one of several encouraging messages to your agent
 
@@ -65,26 +70,32 @@ WORK_Faster_WORK auto-detects which agent is running and sends the correct keybo
 
 ### CLI agents (all platforms — detected by process name)
 
-| Agent | Process name(s) | Interrupt support | Macro sent | Status |
+| Agent | Process name(s) | Interrupt method | Macro sent | Status |
 |---|---|---|---|---|
-| **Claude Code** | `claude` | ✅ Yes (Ctrl+C) | Interrupt + text + Enter | ✅ Tested |
-| **OpenAI Codex CLI** | `codex` | ✅ Follow-up | Text + Enter | ✅ Tested |
-| **GitHub Copilot CLI** | `gh copilot` | ✅ Yes | Interrupt + text + Enter | ✅ Tested |
-| **Aider** | `aider` | ✅ Yes | Interrupt + text + Enter | ✅ Tested |
-| **Gemini CLI** | `gemini` | ✅ Yes | Interrupt + text + Enter | ✅ Tested |
-| **Qwen Code** (通义灵码) | `qwen`, `qwen-code`, `qwen-coder`, `tongyi` | ✅ Yes | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
-| **Trae** (ByteDance CLI) | `trae` | ✅ Yes | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
-| **Open Claw** | `openclaw`, `open-claw` | ❓ Unknown | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
-| **Antigravity** | `antigravity` | ❓ Unknown | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
-| **Qoder** | `qoder` | ❓ Unknown | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
-| **Copaw** | `copaw` | ❓ Unknown | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
-| **Other / fallback** | — | — | Interrupt + text + Enter | — |
+| **Claude Code** | `claude` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ✅ Tested |
+| **OpenAI Codex CLI** | `codex` | None (follow-up) | Text + Enter | ✅ Tested |
+| **GitHub Copilot CLI** | `gh copilot` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ✅ Tested |
+| **Aider** | `aider` | Ctrl+C all platforms | Interrupt + text + Enter | ✅ Tested |
+| **Gemini CLI** | `gemini` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ✅ Tested |
+| **Qwen Code** (通义灵码) | `qwen`, `qwen-code`, `qwen-coder`, `tongyi` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
+| **Trae** (ByteDance CLI) | `trae` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
+| **Open Claw** | `openclaw`, `open-claw` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
+| **Antigravity** | `antigravity` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
+| **Qoder** | `qoder` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
+| **Copaw** | `copaw` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
+| **Other / fallback** | — | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | — |
 
 > **macOS:** terminal process detection uses the TTY (`ps -t <tty>`) for Apple Terminal, falling back to window title for all other terminal emulators (iTerm2, WezTerm, Ghostty, Warp, Hyper).
 
-> **Linux:** detection scans `ps aux` for the first matching agent process name.
+> **Linux:** detection scans process list and prioritizes interactive TTY matches, then newer PIDs, to reduce false picks when multiple agents run at once.
 
-> **Windows:** detection is not yet implemented; fallback macro (Ctrl+C + text + Enter) is used for all agents.
+> **Linux macro backend:** X11 sessions use `xdotool`; Wayland sessions use `ydotool`. If macro execution fails, the app shows a user-visible warning with setup hints.
+
+> **Overlay display area:** the overlay spans the full virtual desktop across all monitors (not only the primary display).
+
+> **Windows:** uses PowerShell (`Get-CimInstance Win32_Process`) to detect which agent is running. Macro strategy is agent-aware: Codex CLI gets a plain follow-up (no interrupt); Aider gets Ctrl+C (it shows a Y/N prompt, so it won't exit immediately); all other CLIs (Claude Code, Gemini, Copilot, Qwen, generic) get Escape to abort the current streaming response without exiting. Text is always sent via clipboard paste (Ctrl+V) so Unicode / CJK characters work correctly and no characters are dropped on consecutive cracks.
+
+> **GitHub Copilot CLI caveat:** `gh copilot suggest` is a one-shot command — each invocation consumes **one API request**. When this app interrupts Copilot CLI and re-submits your phrase, it starts a brand-new suggestion request, so each whip crack uses one API quota slot.
 
 ### Agents known to be incompatible
 
@@ -144,5 +155,4 @@ The bundled default config is at [`config.default.jsonc`](config.default.jsonc).
 - [x] Logs of how many times you whipped the agent (whip crack counter, persisted to disk)
 - [x] Milestone visual effects at every 2^n cracks (escalating from sparkles → confetti → fireworks → rainbow → full chaos)
 - [ ] Updated whip physics
-- [ ] Windows agent detection
-
+- [x] Windows agent detection
