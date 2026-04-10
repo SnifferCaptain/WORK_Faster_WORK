@@ -80,7 +80,7 @@ WORK_Faster_WORK auto-detects which agent is running and sends the correct keybo
 | **Qwen Code** (通义灵码) | `qwen`, `qwen-code`, `qwen-coder`, `tongyi` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
 | **Trae** (ByteDance CLI) | `trae` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
 | **Open Claw** | `openclaw`, `open-claw` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
-| **Antigravity** | `antigravity` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
+| **Antigravity** | `antigravity` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ✅ Tested |
 | **Qoder** | `qoder` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
 | **Copaw** | `copaw` | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | ⚠️ Untested – theoretically viable |
 | **Other / fallback** | — | ESC (Win) / Ctrl+C (mac/Linux) | Interrupt + text + Enter | — |
