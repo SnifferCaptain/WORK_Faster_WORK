@@ -86,6 +86,14 @@ let handleAngle = P.baseTargetAngle;
 let handleAngVel = 0;
 
 const WHIP_CRACK_SOUNDS = ['sounds/A.mp3', 'sounds/B.mp3', 'sounds/C.mp3', 'sounds/D.mp3', 'sounds/E.mp3'];
+// Pre-create one Audio element per sound file so that playCrackSound() never
+// allocates inside requestAnimationFrame (Audio construction + decoding causes
+// a visible jank spike on the first call otherwise).
+const CRACK_AUDIO_POOL = WHIP_CRACK_SOUNDS.map(src => {
+  const a = new Audio(src);
+  a.preload = 'auto';
+  return a;
+});
 
 document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
 document.addEventListener('mousedown', () => {
@@ -161,9 +169,10 @@ const wrapPi = a => {
 };
 
 function playCrackSound() {
-  if (!WHIP_CRACK_SOUNDS.length) return;
-  const src = WHIP_CRACK_SOUNDS[Math.floor(Math.random() * WHIP_CRACK_SOUNDS.length)];
-  const a = new Audio(src);
+  if (!CRACK_AUDIO_POOL.length) return;
+  const a = CRACK_AUDIO_POOL[Math.floor(Math.random() * CRACK_AUDIO_POOL.length)];
+  // Rewind before play so rapid cracks always play from the start.
+  a.currentTime = 0;
   a.play().catch(() => {});
 }
 
@@ -459,7 +468,8 @@ function spawnMilestoneEffect(x, y, level, count) {
   // at high levels and cause frame-rate drops.
   const baseCount = Math.min(8 * (1 << Math.min(level, 4)), MAX_MILESTONE_PARTICLES);
   const speed     = 3.5 + level * 1.4;
-  const lifeBase  = 70 + level * 22;
+  // Shorter lifetimes (fewer active frames) cut total draw calls proportionally.
+  const lifeBase  = 55 + level * 15;
   const gravity   = 0.10 + level * 0.018;
 
   // ── Particle burst ────────────────────────────────────────
@@ -489,7 +499,8 @@ function spawnMilestoneEffect(x, y, level, count) {
   milestoneEffects.push({ kind: 'burst', particles });
 
   // ── Expanding rings (n≥1) ────────────────────────────────
-  const rings = Math.min(level, 4);
+  // Cap at 3 rings (was 4) to reduce per-frame draw calls for high levels.
+  const rings = Math.min(level, 3);
   for (let r = 0; r < rings; r++) {
     const delay = r * 6;
     milestoneEffects.push({
@@ -596,12 +607,9 @@ function drawMilestoneEffects() {
       ctx.globalAlpha = alpha * 0.85;
       ctx.strokeStyle = e.color;
       ctx.lineWidth   = 3 * alpha;
-      ctx.shadowColor = e.color;
-      ctx.shadowBlur  = 8;
       ctx.beginPath();
       ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
       continue;
     }
@@ -617,32 +625,66 @@ function drawMilestoneEffects() {
       continue;
     }
 
-    // burst
+    // burst – batch sparks and stars by color to minimise GPU draw calls.
+    // Each unique color gets ONE beginPath()+stroke()/fill() call instead of one
+    // per particle.  Alpha is averaged across the color group – visually
+    // imperceptible because all particles in a burst are born simultaneously and
+    // their alpha values stay close together within a group.
+    const sparkPaths = new Map();  // color → { totalAlpha, count, lines: [px,py,x,y, …] }
+    const starPaths  = new Map();  // color → { totalAlpha, count, shapes: [{x,y,size,angle}, …] }
+
     for (const p of e.particles) {
       if (p.life <= 0) continue;
       const alpha = p.life / p.maxLife;
-      ctx.globalAlpha = alpha;
 
       if (p.type === 'spark') {
-        ctx.strokeStyle = p.color;
-        ctx.lineWidth   = p.size * alpha;
-        ctx.beginPath();
-        ctx.moveTo(p.px, p.py);
-        ctx.lineTo(p.x, p.y);
-        ctx.stroke();
+        let g = sparkPaths.get(p.color);
+        if (!g) { g = { totalAlpha: 0, count: 0, avgSize: 0, lines: [] }; sparkPaths.set(p.color, g); }
+        g.totalAlpha += alpha;
+        g.avgSize    += p.size;
+        g.count++;
+        g.lines.push(p.px, p.py, p.x, p.y);
+
       } else if (p.type === 'confetti') {
+        // Confetti needs per-particle rotation – can't be batched into a shared path.
+        ctx.globalAlpha = alpha;
         ctx.save();
         ctx.translate(p.x, p.y);
         ctx.rotate(p.angle);
         ctx.fillStyle = p.color;
         ctx.fillRect(-p.size * 0.4, -p.size * 1.4, p.size * 0.8, p.size * 2.8);
         ctx.restore();
+
       } else {
         // star
-        ctx.fillStyle   = p.color;
-        drawMilestoneStar(p.x, p.y, 5, p.size, p.size * 0.45, p.angle);
-        ctx.fill();
+        let g = starPaths.get(p.color);
+        if (!g) { g = { totalAlpha: 0, count: 0, shapes: [] }; starPaths.set(p.color, g); }
+        g.totalAlpha += alpha;
+        g.count++;
+        g.shapes.push({ x: p.x, y: p.y, size: p.size, angle: p.angle });
       }
+    }
+
+    for (const [color, g] of sparkPaths) {
+      ctx.globalAlpha = g.totalAlpha / g.count;
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = g.avgSize / g.count;
+      ctx.beginPath();
+      for (let li = 0; li < g.lines.length; li += 4) {
+        ctx.moveTo(g.lines[li],     g.lines[li + 1]);
+        ctx.lineTo(g.lines[li + 2], g.lines[li + 3]);
+      }
+      ctx.stroke();
+    }
+
+    for (const [color, g] of starPaths) {
+      ctx.globalAlpha = g.totalAlpha / g.count;
+      ctx.fillStyle   = color;
+      ctx.beginPath();
+      for (const s of g.shapes) {
+        drawMilestoneStar(s.x, s.y, 5, s.size, s.size * 0.45, s.angle);
+      }
+      ctx.fill();
     }
   }
   ctx.globalAlpha = 1;

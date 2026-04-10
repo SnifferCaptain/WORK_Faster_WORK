@@ -93,7 +93,9 @@ WORK_Faster_WORK auto-detects which agent is running and sends the correct keybo
 
 > **Overlay display area:** the overlay spans the full virtual desktop across all monitors (not only the primary display).
 
-> **Windows:** uses PowerShell (`Get-WmiObject Win32_Process`) to detect which agent is running. Macro strategy is agent-aware: Codex CLI gets a plain follow-up (no interrupt); Aider gets Ctrl+C (it shows a Y/N prompt, so it won't exit immediately); all other CLIs (Claude Code, Gemini, Copilot, Qwen, generic) get Escape to abort the current streaming response without exiting. Text is always sent via clipboard paste (Ctrl+V) so Unicode / CJK characters work correctly and no characters are dropped on consecutive cracks.
+> **Windows:** uses PowerShell (`Get-CimInstance Win32_Process`) to detect which agent is running. Macro strategy is agent-aware: Codex CLI gets a plain follow-up (no interrupt); Aider gets Ctrl+C (it shows a Y/N prompt, so it won't exit immediately); all other CLIs (Claude Code, Gemini, Copilot, Qwen, generic) get Escape to abort the current streaming response without exiting. Text is always sent via clipboard paste (Ctrl+V) so Unicode / CJK characters work correctly and no characters are dropped on consecutive cracks.
+
+> **GitHub Copilot CLI caveat:** `gh copilot suggest` is a one-shot command — each invocation consumes **one API request**. When this app interrupts Copilot CLI and re-submits your phrase, it starts a brand-new suggestion request, so each whip crack uses one API quota slot.
 
 ### Agents known to be incompatible
 

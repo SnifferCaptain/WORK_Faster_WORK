@@ -93,7 +93,9 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 
 > **Overlay 覆盖范围：** overlay 会覆盖所有显示器组成的虚拟桌面，而不只主屏幕。
 
-> **Windows：** 通过 PowerShell（`Get-WmiObject Win32_Process`）检测当前运行的 Agent。宏策略因 Agent 而异：Codex CLI 直接发送跟进消息（无中断）；Aider 使用 Ctrl+C（它会显示 Y/N 确认，不会立即退出）；其他所有 CLI（Claude Code、Gemini、Copilot、通义灵码等）使用 Escape 中止当前流式输出而不退出程序。文字始终通过剪贴板粘贴（Ctrl+V）发送，因此支持中文等 Unicode 字符，且连续挥鞭时不会丢失开头字符。
+> **Windows：** 通过 PowerShell（`Get-CimInstance Win32_Process`）检测当前运行的 Agent。宏策略因 Agent 而异：Codex CLI 直接发送跟进消息（无中断）；Aider 使用 Ctrl+C（它会显示 Y/N 确认，不会立即退出）；其他所有 CLI（Claude Code、Gemini、Copilot、通义灵码等）使用 Escape 中止当前流式输出而不退出程序。文字始终通过剪贴板粘贴（Ctrl+V）发送，因此支持中文等 Unicode 字符，且连续挥鞭时不会丢失开头字符。
+
+> **GitHub Copilot CLI 注意事项：** `gh copilot suggest` 是单次执行命令——每次调用会消耗 **一个 API 请求额度**。本应用在中断 Copilot CLI 并重新提交短语时，会发起一个全新的 suggestion 请求，因此每次挥鞭均会消耗一个 API 配额。
 
 ### 已知不兼容的 Agent
 

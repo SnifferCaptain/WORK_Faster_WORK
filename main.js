@@ -109,6 +109,10 @@ let windowsAgentCache = { type: AGENT.GENERIC, at: 0 };
 const PASTE_TO_ENTER_DELAY_MS = 60;
 const INTERRUPT_TO_PASTE_DELAY_MS = 100;
 const CLIPBOARD_RESTORE_DEBOUNCE_MS = 400;
+// After sending ctrl+c to interrupt a CLI, wait this long before typing so the
+// terminal has time to interrupt the running task and restore the prompt.
+// Starting to type immediately can cause the first few characters to be lost.
+const LINUX_INTERRUPT_TO_TYPE_DELAY_MS = 150;
 let clipboardRestoreTimer = null;
 let clipboardOriginal = null;
 
@@ -765,7 +769,11 @@ function linuxInterruptAndType(text) {
     if (err) {
       return;
     }
-    xdotoolTypeAndReturn(text);
+    // The xdotool key process finishes quickly (it just injects the keypress),
+    // but the CLI process needs a moment to actually handle SIGINT and return
+    // to the prompt.  If we start typing immediately the terminal may still be
+    // processing the interrupt and will silently swallow the first few chars.
+    setTimeout(() => xdotoolTypeAndReturn(text), LINUX_INTERRUPT_TO_TYPE_DELAY_MS);
   });
 }
 
