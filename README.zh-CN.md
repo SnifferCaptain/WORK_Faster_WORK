@@ -80,7 +80,7 @@ WORK_Faster_WORK 会自动检测当前运行的 Agent，并发送对应的键盘
 | **Qwen Code**（通义灵码）| `qwen`、`qwen-code`、`qwen-coder`、`tongyi` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
 | **Trae**（字节跳动 CLI）| `trae` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
 | **Open Claw** | `openclaw`、`open-claw` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
-| **Antigravity** | `antigravity` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
+| **Antigravity** | `antigravity` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ✅ 已测试 |
 | **Qoder** | `qoder` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
 | **Copaw** | `copaw` | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | ⚠️ 未经测试 — 理论可行 |
 | **其他 / 兜底** | — | ESC（Windows）/ Ctrl+C（macOS/Linux）| 中断 + 文本 + Enter | — |
