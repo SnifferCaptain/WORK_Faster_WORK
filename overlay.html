@@ -630,7 +630,7 @@ function drawMilestoneEffects() {
     // per particle.  Alpha is averaged across the color group – visually
     // imperceptible because all particles in a burst are born simultaneously and
     // their alpha values stay close together within a group.
-    const sparkPaths = new Map();  // color → { totalAlpha, count, lines: [px,py,x,y, …] }
+    const sparkPaths = new Map();  // color → { totalAlpha, count, avgSize, lines: [px,py,x,y, …] }
     const starPaths  = new Map();  // color → { totalAlpha, count, shapes: [{x,y,size,angle}, …] }
 
     for (const p of e.particles) {

@@ -115,6 +115,9 @@ const CLIPBOARD_RESTORE_DEBOUNCE_MS = 400;
 const LINUX_INTERRUPT_TO_TYPE_DELAY_MS = 150;
 let clipboardRestoreTimer = null;
 let clipboardOriginal = null;
+// Tracks whether we have already attempted a clipboard read for this burst.
+// Prevents re-reading on every consecutive crack; reset after the burst ends.
+let clipboardReadAttempted = false;
 
 /** One Alt+Tab / Cmd+Tab so focus returns to the previously active app after tray click. */
 function refocusPreviousApp() {
@@ -846,12 +849,14 @@ function windowsPasteAndEnter(text) {
   if (!keybd_event) return;
 
   // Preserve the user's clipboard for the first crack in a burst.
-  if (clipboardRestoreTimer === null && clipboardOriginal === null) {
+  if (clipboardRestoreTimer === null && !clipboardReadAttempted) {
+    clipboardReadAttempted = true;
     try {
       clipboardOriginal = clipboard.readText();
     } catch (e) {
-      console.warn('clipboard.readText failed:', e?.message || e);
-      clipboardOriginal = ''; // treat as empty so we still restore to a known state
+      console.warn('clipboard.readText failed – clipboard will not be restored:', e?.message || e);
+      // clipboardOriginal stays null; the restore step will be skipped so we
+      // don't overwrite the user's clipboard with an empty string.
     }
   }
   // Reset the debounced restore timer so each rapid crack extends the window.
@@ -893,6 +898,7 @@ function windowsPasteAndEnter(text) {
         }
         clipboardOriginal = null;
       }
+      clipboardReadAttempted = false;
       clipboardRestoreTimer = null;
     }, CLIPBOARD_RESTORE_DEBOUNCE_MS);
   }, PASTE_TO_ENTER_DELAY_MS);
